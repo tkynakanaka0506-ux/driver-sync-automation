@@ -27,7 +27,9 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Restore token cache from secret
-        run: echo "${{ secrets.TOKEN_CACHE_B64 }}" | base64 -d > token_cache.bin
+        run: |
+          printf '%s' "${{ secrets.TOKEN_CACHE_B64 }}" | base64 -d > token_cache.bin
+          echo "decoded bytes: $(wc -c < token_cache.bin)"
 
       - name: Run sync
         env:
