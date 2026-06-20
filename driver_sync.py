@@ -23,7 +23,9 @@ import re
 import sys
 import time
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
+
+JST = timezone(timedelta(hours=9))
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -2735,7 +2737,7 @@ def write_last_synced_label(graph_token: str, config: dict[str, Any]) -> None:
     sheet_name = od.get("sheet_name", "ドライバー情報")
     item = graph_get_drive_item(graph_token, remote_path)
     item_id = item["id"]
-    timestamp = datetime.now().strftime("%Y/%m/%d %H:%M")
+    timestamp = datetime.now(JST).strftime("%Y/%m/%d %H:%M")
     url = (
         f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/"
         f"worksheets('{sheet_name}')/range(address='E1')"
