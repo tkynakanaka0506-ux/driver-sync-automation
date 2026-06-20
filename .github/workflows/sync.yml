@@ -1,0 +1,45 @@
+name: driver-sync
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: driver-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Restore token cache from secret
+        run: echo "${{ secrets.TOKEN_CACHE_B64 }}" | base64 -d > token_cache.bin
+
+      - name: Run sync
+        env:
+          DRIVER_SYNC_UNATTENDED: "1"
+        run: python driver_sync.py
+
+      - name: Persist refreshed token cache back to secret
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.SECRETS_PAT }}
+        run: |
+          if [ -f token_cache.bin ]; then
+            NEW_B64=$(base64 -w0 token_cache.bin)
+            gh secret set TOKEN_CACHE_B64 --repo "${{ github.repository }}" --body "$NEW_B64"
+          fi

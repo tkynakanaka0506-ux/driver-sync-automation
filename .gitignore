@@ -1,0 +1,5 @@
+token_cache.bin
+*.log
+driver_sync_status.json
+debug_*.json
+__pycache__/

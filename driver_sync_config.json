@@ -1,0 +1,67 @@
+{
+  "tenant_id": "d9bcbd1a-1300-4da2-832f-09d8da2ecbd0",
+  "client_id": "7455d9f1-3743-43d6-ae27-c825aff61f20",
+  "redirect_port": 5000,
+  "sharepoint_hostname": "showatekkou.sharepoint.com",
+  "sharepoint_site_path": "/sites/driver",
+  "list_display_name": "ドライバー情報",
+  "header_rows": 4,
+  "auto_detect_columns": true,
+  "arr_days_back": 7,
+  "login_hint": "t_nakanishi@showa.co.jp",
+  "onedrive_output": {
+    "enabled": true,
+    "path": "/ドライバー情報/ドライバー情報_営業用.xlsx",
+    "share_scope": "anonymous",
+    "update_mode": "preserve_format",
+    "allow_full_replace": false,
+    "sheet_name": "ドライバー情報",
+    "use_excel_table": false,
+    "table_name": "",
+    "table_header_row": 6,
+    "data_start_row": 7,
+    "output_column_map": {
+      "案件No": "A",
+      "案件名": "B",
+      "出荷日": "C",
+      "着日": "D",
+      "型式": "E",
+      "車型": "F",
+      "会社名": "G",
+      "乗務員": "H",
+      "車番": "I",
+      "携帯番号": "J",
+      "備考": "K"
+    },
+    "row_colors_by_case_name": {
+      "㈱丸運　羽田京浜物流センター": "#C8E3F3",
+      "司企業　鳥栖営業所　横持": "#C8E3F3",
+      "司企業　鳥栖営業所": "#C8E3F3",
+      "株式会社　中通(本社)": "#C8E3F3",
+      "福岡ロジテック　宇美倉庫": "#C8E3F3"
+    },
+    "default_row_fill": "#DAEEF3",
+    "driver_block_fill": "#F8D6D6",
+    "driver_block_fill_highlight": "#E6B9B8",
+    "padding_end_row": 80
+  },
+  "sync_sharepoint": false,
+  "sources": [
+    {
+      "key": "matsuzaki",
+      "share_url": "https://1drv.ms/x/c/1331A7580E0E4466/IQBmRA4OWKcxIIATMAEAAAAAARXbvmh9C5v4gGy--GiQ7Og"
+    },
+    {
+      "key": "nakadori",
+      "share_url": "https://1drv.ms/x/c/1331A7580E0E4466/IQBmRA4OWKcxIIAT9wEAAAAAAZCgt7_wIHzjCxsPAw1ddZA"
+    },
+    {
+      "key": "fukuoka",
+      "share_url": "https://1drv.ms/x/c/1331A7580E0E4466/IQBmRA4OWKcxIIATfwEAAAAAAX7hzpJXjkSqaxMbYcThl54"
+    },
+    {
+      "key": "maruun",
+      "share_url": "https://1drv.ms/x/c/1331A7580E0E4466/IQBmRA4OWKcxIIATkQEAAAAAAV4yPfVEZNRF5g-HiZJuRAo"
+    }
+  ]
+}
