@@ -29,13 +29,7 @@ jobs:
       - name: Restore token cache from secret
         env:
           TOKEN_B64: ${{ secrets.TOKEN_CACHE_B64 }}
-        run: |
-          echo "secret length: ${#TOKEN_B64}"
-          echo "first 10 chars: ${TOKEN_B64:0:10}"
-          echo "last 10 chars: ${TOKEN_B64: -10}"
-          printf '%s' "$TOKEN_B64" > token_b64.txt
-          base64 -d token_b64.txt > token_cache.bin
-          echo "decoded bytes: $(wc -c < token_cache.bin)"
+        run: printf '%s' "$TOKEN_B64" | base64 -d > token_cache.bin
 
       - name: Run sync
         env:
