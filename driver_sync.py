@@ -2650,12 +2650,16 @@ def graph_get_ignored_case_numbers(
     if not res.ok:
         return set()
     values = res.json().get("values") or []
-    return {
-        str(cell).strip()
-        for row in values
-        for cell in row
-        if str(cell).strip()
-    }
+    result: set[str] = set()
+    for row in values:
+        for cell in row:
+            if isinstance(cell, float) and cell.is_integer():
+                text = str(int(cell))
+            else:
+                text = str(cell).strip()
+            if text:
+                result.add(text)
+    return result
 
 
 def categorize_issue_messages(
