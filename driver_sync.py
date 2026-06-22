@@ -103,6 +103,7 @@ HIGHLIGHT_DRIVER_FILL_HEX = "#E6B9B8"
 # その他: 薄い青（A〜E） / 薄い赤（F〜K）
 DEFAULT_CASE_FILL_HEX = "#DAEEF3"
 DEFAULT_DRIVER_FILL_HEX = "#F8D6D6"
+CHANGED_DRIVER_FILL_HEX = "#FFFF00"
 
 DEFAULT_CASE_NAME_ROW_COLORS: dict[str, str] = {
     name: HIGHLIGHT_CASE_FILL_HEX for name in HIGHLIGHT_CASE_NAMES
@@ -915,8 +916,8 @@ def arr_window_start(today: date, days_back: int) -> date:
 
 
 def arr_window_end(today: date) -> date:
-    """着日上限: 明日（暦日）。"""
-    return today + timedelta(days=1)
+    """着日上限: 明後日（暦日）。"""
+    return today + timedelta(days=2)
 
 
 def is_arr_in_sync_window(
@@ -1456,6 +1457,126 @@ def driver_block_col_range(col_map: dict[str, int]) -> tuple[int, int]:
     return min(cols), max(cols)
 
 
+DIFF_STATE_SHEET = "_diff_state"
+DRIVER_SNAPSHOT_FIELDS = ("車型", "会社名", "乗務員", "車番", "携帯番号")
+
+
+def driver_block_snapshot(row: dict[str, Any]) -> str:
+    return "|".join(str(row.get(f, "") or "") for f in DRIVER_SNAPSHOT_FIELDS)
+
+
+def diff_state_case_key(row: dict[str, Any]) -> str:
+    raw = str(row.get("案件No", "") or "")
+    return raw.splitlines()[0].strip() if raw else ""
+
+
+def graph_ensure_diff_state_sheet(
+    graph_token: str, item_id: str, session_id: str
+) -> str:
+    """ドライバー情報の変更検出用の非表示シートが無ければ作成する。"""
+    url = f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/worksheets"
+    res = graph_request_with_retry("GET", url, graph_token, session_id=session_id)
+    names = [w["name"] for w in res.json().get("value", [])] if res.ok else []
+    if DIFF_STATE_SHEET in names:
+        return DIFF_STATE_SHEET
+    res = graph_request_with_retry(
+        "POST", url, graph_token, session_id=session_id,
+        json={"name": DIFF_STATE_SHEET},
+    )
+    if not res.ok:
+        raise RuntimeError(
+            f"_diff_state シート作成失敗: {res.status_code} {res.text[:200]}"
+        )
+    hide_url = (
+        f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/"
+        f"worksheets('{DIFF_STATE_SHEET}')"
+    )
+    graph_request_with_retry(
+        "PATCH", hide_url, graph_token, session_id=session_id,
+        json={"visibility": "Hidden"},
+    )
+    return DIFF_STATE_SHEET
+
+
+def graph_load_diff_state(
+    graph_token: str, item_id: str, session_id: str
+) -> dict[str, tuple[str, bool]]:
+    sheet = graph_ensure_diff_state_sheet(graph_token, item_id, session_id)
+    url = (
+        f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/"
+        f"worksheets('{sheet}')/usedRange(valuesOnly=true)"
+    )
+    res = graph_request_with_retry("GET", url, graph_token, session_id=session_id)
+    state: dict[str, tuple[str, bool]] = {}
+    if not res.ok:
+        return state
+    for row in res.json().get("values") or []:
+        if not row or not row[0]:
+            continue
+        key = str(row[0]).strip()
+        if not key:
+            continue
+        snapshot = str(row[1]) if len(row) > 1 and row[1] is not None else ""
+        changed = bool(len(row) > 2 and str(row[2]).strip() in ("1", "TRUE", "True"))
+        state[key] = (snapshot, changed)
+    return state
+
+
+def graph_save_diff_state(
+    graph_token: str,
+    item_id: str,
+    session_id: str,
+    state: dict[str, tuple[str, bool]],
+) -> None:
+    sheet = graph_ensure_diff_state_sheet(graph_token, item_id, session_id)
+    base = (
+        f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/worksheets('{sheet}')"
+    )
+    graph_request_with_retry(
+        "POST", f"{base}/range(address='A1:C5000')/clear", graph_token,
+        session_id=session_id, json={"applyTo": "Contents"},
+    )
+    if not state:
+        return
+    rows_out = [
+        [key, snapshot, "1" if changed else ""]
+        for key, (snapshot, changed) in state.items()
+    ]
+    address = f"A1:C{len(rows_out)}"
+    graph_request_with_retry(
+        "PATCH", f"{base}/range(address='{address}')", graph_token,
+        session_id=session_id, json={"values": rows_out},
+    )
+
+
+def apply_driver_change_detection(
+    graph_token: str,
+    item_id: str,
+    session_id: str,
+    rows: list[dict[str, Any]],
+) -> None:
+    """ドライバー情報(車型/会社名/乗務員/車番/携帯番号)が前回から変わった案件を検出し、
+    一度変わった案件は以後ずっと黄色で表示し続けるためのフラグを各行に付与する。"""
+    state = graph_load_diff_state(graph_token, item_id, session_id)
+    new_state: dict[str, tuple[str, bool]] = {}
+    changed_count = 0
+    for row in rows:
+        key = diff_state_case_key(row)
+        if not key:
+            row["_driver_changed"] = False
+            continue
+        snapshot = driver_block_snapshot(row)
+        prev_snapshot, prev_changed = state.get(key, ("", False))
+        changed = prev_changed or (bool(prev_snapshot) and prev_snapshot != snapshot)
+        row["_driver_changed"] = changed
+        new_state[key] = (snapshot, changed)
+        if changed:
+            changed_count += 1
+    graph_save_diff_state(graph_token, item_id, session_id, new_state)
+    if changed_count:
+        logging.info("ドライバー情報の変更検出: %d件を黄色表示", changed_count)
+
+
 def apply_output_row_colors(
     graph_token: str,
     item_id: str,
@@ -1483,9 +1604,13 @@ def apply_output_row_colors(
             (range_address(case_min, case_max, excel_row, excel_row), case_fill)
         )
         driver_address = range_address(driver_min, driver_max, excel_row, excel_row)
-        # 中継あり（二次配送が別行に発生する）一次配送行は、ドライバー情報ブロックを
-        # 塗りつぶしなしにして区別する。
-        if row.get("中継あり"):
+        if row.get("_driver_changed"):
+            # ドライバー情報が前回から変わった案件は、中継ありの塗りなし表示より
+            # 優先して黄色で目立たせる（一度変わったら以後ずっと黄色のまま）。
+            fills.append((driver_address, CHANGED_DRIVER_FILL_HEX))
+        elif row.get("中継あり"):
+            # 中継あり（二次配送が別行に発生する）一次配送行は、ドライバー情報ブロックを
+            # 塗りつぶしなしにして区別する。
             clear_addresses.append(driver_address)
         else:
             fills.append((driver_address, driver_fill))
@@ -2397,6 +2522,7 @@ def update_onedrive_values_only(
             graph_batch_set_row_heights(
                 graph_token, item_id, ws_name, row_heights, session_id
             )
+            apply_driver_change_detection(graph_token, item_id, session_id, rows)
             apply_output_row_colors(
                 graph_token,
                 item_id,
