@@ -86,8 +86,8 @@ EXCEL_OUTPUT_COLUMNS = [
 # ---------------------------------------------------------------------------
 # 出力Excel 行色（A〜E=案件情報 / F〜K=★ドライバー情報★）
 # ---------------------------------------------------------------------------
-CASE_BLOCK_COLUMN_NAMES = ("案件No", "案件名", "出荷日", "着日", "備考")
-DRIVER_BLOCK_COLUMN_NAMES = ("型式", "車型", "会社名", "乗務員", "車番", "携帯番号")
+CASE_BLOCK_COLUMN_NAMES = ("案件No", "案件名", "出荷日", "着日", "備考", "型式")
+DRIVER_BLOCK_COLUMN_NAMES = ("車型", "会社名", "乗務員", "車番", "携帯番号")
 
 HIGHLIGHT_CASE_NAMES = (
     "㈱丸運　羽田京浜物流センター",
@@ -2076,7 +2076,7 @@ def graph_set_wrap_text(
 
 
 SINGLE_LINE_ROW_HEIGHT = 21.0
-ROW_HEIGHT_PADDING = 12.0
+ROW_HEIGHT_PADDING = 20.0
 PER_EXTRA_LINE_HEIGHT = 20.5
 ROW_FONT_SIZE = 13.0
 ROW_LINE_COUNT_FIELDS = ("案件No", "案件名", "型式", "備考")
@@ -2752,7 +2752,7 @@ def extract_issue_entry(msg: str) -> str | None:
     return case_no
 
 
-IGNORE_LIST_RANGE = "F2:H4"  # F2〜H4の9セル。1セルに1案件Noを入力する。
+IGNORE_LIST_RANGE = "G3:H4"  # G3〜H4の4セル。1セルに1案件Noを入力する。
 
 
 def graph_get_ignored_case_numbers(
