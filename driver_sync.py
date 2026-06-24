@@ -1466,6 +1466,11 @@ def driver_block_snapshot(row: dict[str, Any]) -> str:
 
 
 def diff_state_case_key(row: dict[str, Any]) -> str:
+    # 同じ案件Noが複数の物理行（別配送）に存在することがあるため、
+    # 案件Noではなく行単位で一意な「行キー」を使う（取り違えによる誤検出防止）。
+    row_key = str(row.get("行キー", "") or "")
+    if row_key:
+        return row_key
     raw = str(row.get("案件No", "") or "")
     return raw.splitlines()[0].strip() if raw else ""
 
