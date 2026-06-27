@@ -157,6 +157,28 @@ DATA_ALIGNMENT = Alignment(horizontal="center", vertical="center", wrap_text=Tru
 MAIN_COLUMN_WIDTH_PT = {"A": 113.25, "B": 264.0, "C": 74.25, "D": 78.0, "E": 119.25, "F": 355.5, "G": 126.75}
 # 案件情報の塗り色は若干グレーで統一（営業用Excelの案件名別ハイライトは使わない）
 CASE_INFO_FILL_HEX = "#EDEDED"
+# 出荷日ごとの区切り見出し行（黒背景・白文字）
+DATE_HEADER_FILL_HEX = "FF000000"
+DATE_HEADER_FONT = Font(name=MAIN_FONT_NAME, size=MAIN_FONT_SIZE, bold=True, color="FFFFFFFF")
+DATE_HEADER_ALIGNMENT = Alignment(horizontal="center", vertical="center")
+DATE_HEADER_ROW_HEIGHT = 24
+SPACER_ROW_HEIGHT = 8
+
+
+def group_rows_by_date(
+    rows: list[dict[str, Any]], today: date, window_end: date
+) -> list[tuple[date, list[dict[str, Any]]]]:
+    """today〜window_end の全日付を順に、その日の案件行とセットで返す（0件の日も含む）。"""
+    by_date: dict[date, list[dict[str, Any]]] = {}
+    for row in rows:
+        by_date.setdefault(row["_出荷日付"], []).append(row)
+
+    result: list[tuple[date, list[dict[str, Any]]]] = []
+    d = today
+    while d <= window_end:
+        result.append((d, by_date.get(d, [])))
+        d += timedelta(days=1)
+    return result
 
 
 def fetch_main_header_row(graph_token: str, config: dict[str, Any]) -> list[str]:
@@ -200,19 +222,35 @@ def build_summary_xlsx_bytes(
         cell.alignment = DATA_ALIGNMENT
     ws.row_dimensions[HEADER_ROW].height = MAIN_ROW_HEIGHT
 
-    for idx, row in enumerate(rows):
-        row_num = DATA_START_ROW + idx
-        for col, name in enumerate(SUMMARY_OUTPUT_COLUMNS, start=1):
-            value = cell_output_value(row, name)
-            cell = ws.cell(row_num, col, value)
-            cell.font = Font(name=MAIN_FONT_NAME, size=MAIN_FONT_SIZE)
-            cell.alignment = DATA_ALIGNMENT
+    last_col_letter = openpyxl.utils.get_column_letter(case_max)
+    row_num = DATA_START_ROW
+    for day, day_rows in group_rows_by_date(rows, today, window_end):
+        ws.row_dimensions[row_num].height = SPACER_ROW_HEIGHT
+        row_num += 1
 
-        fill = openpyxl_fill_from_hex(CASE_INFO_FILL_HEX)
+        ws.merge_cells(f"A{row_num}:{last_col_letter}{row_num}")
+        header_cell = ws.cell(row_num, 1, f"{format_date_label(day)} 出荷数：{len(day_rows)}件")
+        header_cell.font = DATE_HEADER_FONT
+        header_cell.alignment = DATE_HEADER_ALIGNMENT
+        header_fill = PatternFill(start_color=DATE_HEADER_FILL_HEX, end_color=DATE_HEADER_FILL_HEX, fill_type="solid")
         for col in range(case_min, case_max + 1):
-            ws.cell(row_num, col).fill = fill
+            ws.cell(row_num, col).fill = header_fill
+        ws.row_dimensions[row_num].height = DATE_HEADER_ROW_HEIGHT
+        row_num += 1
 
-        ws.row_dimensions[row_num].height = MAIN_ROW_HEIGHT
+        for day_row in day_rows:
+            for col, name in enumerate(SUMMARY_OUTPUT_COLUMNS, start=1):
+                value = cell_output_value(day_row, name)
+                cell = ws.cell(row_num, col, value)
+                cell.font = Font(name=MAIN_FONT_NAME, size=MAIN_FONT_SIZE)
+                cell.alignment = DATA_ALIGNMENT
+
+            fill = openpyxl_fill_from_hex(CASE_INFO_FILL_HEX)
+            for col in range(case_min, case_max + 1):
+                ws.cell(row_num, col).fill = fill
+
+            ws.row_dimensions[row_num].height = MAIN_ROW_HEIGHT
+            row_num += 1
 
     for col_letter, width_pt in MAIN_COLUMN_WIDTH_PT.items():
         ws.column_dimensions[col_letter].width = round(width_pt / 7, 1)
