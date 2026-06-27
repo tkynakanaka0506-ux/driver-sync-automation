@@ -89,7 +89,9 @@ EXCEL_OUTPUT_COLUMNS = [
 # 出力Excel 行色（A〜E=案件情報 / F〜K=★ドライバー情報★）
 # ---------------------------------------------------------------------------
 CASE_BLOCK_COLUMN_NAMES = ("案件No", "案件名", "出荷日", "着日", "備考", "型式")
-DRIVER_BLOCK_COLUMN_NAMES = ("車型", "会社名", "乗務員", "車番", "携帯番号", "依頼先")
+DRIVER_BLOCK_COLUMN_NAMES = ("車型", "会社名", "乗務員", "車番", "携帯番号")
+# 依頼先(L列)は色分け対象外。常に塗りつぶしなし（白）にする。
+WHITE_FILL_COLUMN_NAMES = ("依頼先",)
 
 HIGHLIGHT_CASE_NAMES = (
     "㈱丸運　羽田京浜物流センター",
@@ -1634,6 +1636,13 @@ def apply_output_row_colors(
         else:
             fills.append((driver_address, driver_fill))
 
+        for white_col_name in WHITE_FILL_COLUMN_NAMES:
+            white_col = col_map.get(white_col_name)
+            if white_col:
+                clear_addresses.append(
+                    range_address(white_col, white_col, excel_row, excel_row)
+                )
+
     graph_batch_patch_fills(graph_token, item_id, sheet_name, fills, session_id)
     graph_batch_clear_fills(graph_token, item_id, sheet_name, clear_addresses, session_id)
 
@@ -1878,6 +1887,7 @@ def apply_alternating_padding_row_colors(
     default_case, default_driver = default_style_fills(colors)
 
     fills: list[tuple[str, str]] = []
+    clear_addresses: list[str] = []
     for excel_row in range(padding_start_row, padding_end_row + 1):
         case_fill, driver_fill = resolve_padding_row_fills(
             excel_row, padding_start_row, colors, color_map
@@ -1888,8 +1898,15 @@ def apply_alternating_padding_row_colors(
         fills.append(
             (range_address(driver_min, driver_max, excel_row, excel_row), driver_fill)
         )
+        for white_col_name in WHITE_FILL_COLUMN_NAMES:
+            white_col = col_map.get(white_col_name)
+            if white_col:
+                clear_addresses.append(
+                    range_address(white_col, white_col, excel_row, excel_row)
+                )
 
     graph_batch_patch_fills(graph_token, item_id, sheet_name, fills, session_id)
+    graph_batch_clear_fills(graph_token, item_id, sheet_name, clear_addresses, session_id)
 
     row_count = padding_end_row - padding_start_row + 1
     logging.info(
