@@ -2473,7 +2473,7 @@ def update_onedrive_values_only(
 ) -> int:
     """Graph Excel API で着日範囲内の件数だけ A7:K* に書込み、余剰行を自動削除。"""
     od = config.get("onedrive_output", {})
-    remote_path = od.get("path", "/ドライバー情報/ドライバー情報_営業用.xlsx")
+    remote_path = od.get("path", "/ドライバー情報/ドライバー情報_営業用.xlsm")
     sheet_name = od.get("sheet_name", "ドライバー情報")
 
     item = graph_get_drive_item(graph_token, remote_path)
@@ -2866,7 +2866,7 @@ def graph_get_ignored_case_numbers(
     その案件は次回以降「要確認」アラートから除外される（読むだけで上書きしない）。
     """
     od = config.get("onedrive_output", {})
-    remote_path = od.get("path", "/ドライバー情報/ドライバー情報_営業用.xlsx")
+    remote_path = od.get("path", "/ドライバー情報/ドライバー情報_営業用.xlsm")
     sheet_name = od.get("sheet_name", "ドライバー情報")
     item = graph_get_drive_item(graph_token, remote_path)
     item_id = item["id"]
@@ -2937,7 +2937,7 @@ def write_alert_label(
 ) -> None:
     """E2に種類別件数、E3〜E4に「出荷日 / 案件No」を表示（問題なければ空欄）。"""
     od = config.get("onedrive_output", {})
-    remote_path = od.get("path", "/ドライバー情報/ドライバー情報_営業用.xlsx")
+    remote_path = od.get("path", "/ドライバー情報/ドライバー情報_営業用.xlsm")
     sheet_name = od.get("sheet_name", "ドライバー情報")
     item = graph_get_drive_item(graph_token, remote_path)
     item_id = item["id"]
@@ -2965,7 +2965,7 @@ def write_alert_label(
 def write_last_synced_label(graph_token: str, config: dict[str, Any]) -> None:
     """E1セルに最終更新時刻を表示（コメントBOX横の更新状況表示）。"""
     od = config.get("onedrive_output", {})
-    remote_path = od.get("path", "/ドライバー情報/ドライバー情報_営業用.xlsx")
+    remote_path = od.get("path", "/ドライバー情報/ドライバー情報_営業用.xlsm")
     sheet_name = od.get("sheet_name", "ドライバー情報")
     item = graph_get_drive_item(graph_token, remote_path)
     item_id = item["id"]
@@ -2991,7 +2991,7 @@ def publish_onedrive_for_sales(
     issue_messages: list[str] | None = None,
 ) -> tuple[str, int, int]:
     od = config.get("onedrive_output", {})
-    remote_path = od.get("path", "/ドライバー情報/ドライバー情報_営業用.xlsx")
+    remote_path = od.get("path", "/ドライバー情報/ドライバー情報_営業用.xlsm")
     share_scope = od.get("share_scope", "anonymous")
     data_start_row = int(od.get("data_start_row", 7))
     data_end_row = output_data_end_row(data_start_row, len(rows))
