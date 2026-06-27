@@ -19,7 +19,7 @@ from typing import Any
 
 import jpholiday
 import openpyxl
-from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
 from driver_sync import (
     GRAPH_SCOPES,
@@ -157,12 +157,22 @@ DATA_ALIGNMENT = Alignment(horizontal="center", vertical="center", wrap_text=Tru
 MAIN_COLUMN_WIDTH_PT = {"A": 113.25, "B": 264.0, "C": 74.25, "D": 78.0, "E": 119.25, "F": 355.5, "G": 126.75}
 # 案件情報の塗り色は若干グレーで統一（営業用Excelの案件名別ハイライトは使わない）
 CASE_INFO_FILL_HEX = "#EDEDED"
+# 横持ち（案件名に「横持」を含む案件）は少し濃いグレーで区別する
+YOKOMOCHI_FILL_HEX = "#BFBFBF"
+YOKOMOCHI_KEYWORD = "横持"
 # 出荷日ごとの区切り見出し行（黒背景・白文字）
 DATE_HEADER_FILL_HEX = "FF000000"
 DATE_HEADER_FONT = Font(name=MAIN_FONT_NAME, size=MAIN_FONT_SIZE, bold=True, color="FFFFFFFF")
 DATE_HEADER_ALIGNMENT = Alignment(horizontal="center", vertical="center")
 DATE_HEADER_ROW_HEIGHT = 24
 SPACER_ROW_HEIGHT = 8
+# 表全体に罫線を引く（薄いグレー）
+TABLE_BORDER = Border(
+    left=Side(style="thin", color="FFBFBFBF"),
+    right=Side(style="thin", color="FFBFBFBF"),
+    top=Side(style="thin", color="FFBFBFBF"),
+    bottom=Side(style="thin", color="FFBFBFBF"),
+)
 
 
 def group_rows_by_date(
@@ -220,6 +230,7 @@ def build_summary_xlsx_bytes(
         cell = ws.cell(HEADER_ROW, col, text)
         cell.font = Font(name=MAIN_FONT_NAME, size=MAIN_FONT_SIZE, bold=True)
         cell.alignment = DATA_ALIGNMENT
+        cell.border = TABLE_BORDER
     ws.row_dimensions[HEADER_ROW].height = MAIN_ROW_HEIGHT
 
     last_col_letter = openpyxl.utils.get_column_letter(case_max)
@@ -235,19 +246,22 @@ def build_summary_xlsx_bytes(
         header_fill = PatternFill(start_color=DATE_HEADER_FILL_HEX, end_color=DATE_HEADER_FILL_HEX, fill_type="solid")
         for col in range(case_min, case_max + 1):
             ws.cell(row_num, col).fill = header_fill
+            ws.cell(row_num, col).border = TABLE_BORDER
         ws.row_dimensions[row_num].height = DATE_HEADER_ROW_HEIGHT
         row_num += 1
 
         for day_row in day_rows:
+            is_yokomochi = YOKOMOCHI_KEYWORD in str(day_row.get("案件名", ""))
             for col, name in enumerate(SUMMARY_OUTPUT_COLUMNS, start=1):
                 value = cell_output_value(day_row, name)
                 cell = ws.cell(row_num, col, value)
                 cell.font = Font(name=MAIN_FONT_NAME, size=MAIN_FONT_SIZE)
                 cell.alignment = DATA_ALIGNMENT
 
-            fill = openpyxl_fill_from_hex(CASE_INFO_FILL_HEX)
+            fill = openpyxl_fill_from_hex(YOKOMOCHI_FILL_HEX if is_yokomochi else CASE_INFO_FILL_HEX)
             for col in range(case_min, case_max + 1):
                 ws.cell(row_num, col).fill = fill
+                ws.cell(row_num, col).border = TABLE_BORDER
 
             ws.row_dimensions[row_num].height = MAIN_ROW_HEIGHT
             row_num += 1
