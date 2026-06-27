@@ -31,7 +31,6 @@ from driver_sync import (
     extract_rows_from_workbook,
     graph_get_drive_item,
     graph_read_range_values,
-    is_unattended,
     load_case_name_row_color_map,
     load_config,
     load_output_row_colors,
@@ -290,8 +289,8 @@ def main() -> int:
         format="%(asctime)s [%(levelname)s] %(message)s",
         handlers=[
             logging.FileHandler(SCRIPT_DIR_LOG, encoding="utf-8"),
-        ]
-        + ([] if is_unattended() else [logging.StreamHandler()]),
+            logging.StreamHandler(),
+        ],
         force=True,
     )
     return run_summary(dry_run=args.dry_run, force_login=args.login)
