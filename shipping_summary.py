@@ -31,13 +31,10 @@ from driver_sync import (
     extract_rows_from_workbook,
     graph_get_drive_item,
     graph_read_range_values,
-    load_case_name_row_color_map,
     load_config,
-    load_output_row_colors,
     openpyxl_fill_from_hex,
     prepare_rows_for_output,
     release_process_lock,
-    resolve_row_block_fills,
     rotate_log_if_needed,
     setup_logging,
     upload_onedrive_excel,
@@ -158,6 +155,8 @@ MAIN_ROW_HEIGHT = 81.75
 DATA_ALIGNMENT = Alignment(horizontal="center", vertical="center", wrap_text=True)
 # 列幅(pt)を実書式から取得し、openpyxlの文字幅単位に変換（目安: pt/7）
 MAIN_COLUMN_WIDTH_PT = {"A": 113.25, "B": 264.0, "C": 74.25, "D": 78.0, "E": 119.25, "F": 355.5, "G": 126.75}
+# 案件情報の塗り色は若干グレーで統一（営業用Excelの案件名別ハイライトは使わない）
+CASE_INFO_FILL_HEX = "#EDEDED"
 
 
 def fetch_main_header_row(graph_token: str, config: dict[str, Any]) -> list[str]:
@@ -182,8 +181,6 @@ def build_summary_xlsx_bytes(
     config: dict[str, Any],
 ) -> bytes:
     """営業用Excelと同じA〜G列構成（6行目=見出し、7行目〜=データ）で出力する。"""
-    color_map = load_case_name_row_color_map(config)
-    colors = load_output_row_colors(config)
     case_min, case_max = 1, len(SUMMARY_OUTPUT_COLUMNS)
 
     wb = openpyxl.Workbook()
@@ -211,8 +208,7 @@ def build_summary_xlsx_bytes(
             cell.font = Font(name=MAIN_FONT_NAME, size=MAIN_FONT_SIZE)
             cell.alignment = DATA_ALIGNMENT
 
-        case_hex, _ = resolve_row_block_fills(str(row.get("案件名", "")), color_map, colors)
-        fill = openpyxl_fill_from_hex(case_hex)
+        fill = openpyxl_fill_from_hex(CASE_INFO_FILL_HEX)
         for col in range(case_min, case_max + 1):
             ws.cell(row_num, col).fill = fill
 
