@@ -19,7 +19,7 @@ from typing import Any
 
 import jpholiday
 import openpyxl
-from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
 from driver_sync import (
     GRAPH_SCOPES,
@@ -159,6 +159,22 @@ DATA_ALIGNMENT = Alignment(horizontal="center", vertical="center", wrap_text=Tru
 # 列幅(pt)を実書式から取得し、openpyxlの文字幅単位に変換（目安: pt/7）
 MAIN_COLUMN_WIDTH_PT = {"A": 113.25, "B": 264.0, "C": 74.25, "D": 78.0, "E": 119.25, "F": 355.5, "G": 126.75}
 
+# 見出し・タイトル行用のダーク配色（黒系で締まった見た目にする）
+HEADER_DARK_FILL_HEX = "FF1F1F1F"
+TODAY_ACCENT_HEX = "FFB89B5E"  # 当日の出荷日行だけ金系の太枠で目立たせる
+TABLE_BORDER = Border(
+    left=Side(style="thin", color="FF3A3A3A"),
+    right=Side(style="thin", color="FF3A3A3A"),
+    top=Side(style="thin", color="FF3A3A3A"),
+    bottom=Side(style="thin", color="FF3A3A3A"),
+)
+TODAY_BORDER = Border(
+    left=Side(style="medium", color=TODAY_ACCENT_HEX),
+    right=Side(style="medium", color=TODAY_ACCENT_HEX),
+    top=Side(style="medium", color=TODAY_ACCENT_HEX),
+    bottom=Side(style="medium", color=TODAY_ACCENT_HEX),
+)
+
 
 def fetch_main_header_row(graph_token: str, config: dict[str, Any]) -> list[str]:
     """営業用Excelの6行目（A6:G6）の見出しをそのままコピーする。"""
@@ -189,27 +205,38 @@ def build_summary_xlsx_bytes(
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = DEFAULT_SHEET_NAME
+    ws.sheet_view.showGridLines = False
 
-    ws["A1"] = (
-        f"最終更新: {datetime.now(JST).strftime('%Y/%m/%d %H:%M')}　"
+    last_col_letter = openpyxl.utils.get_column_letter(len(SUMMARY_OUTPUT_COLUMNS))
+    ws.merge_cells(f"A1:{last_col_letter}1")
+    title_cell = ws["A1"]
+    title_cell.value = (
+        f"出荷日別 案件サマリー　最終更新: {datetime.now(JST).strftime('%Y/%m/%d %H:%M')}　"
         f"（表示範囲: {format_date_label(today)}〜{format_date_label(window_end)}・"
         f"{len(rows)}件）"
     )
-    ws["A1"].font = Font(name=MAIN_FONT_NAME, size=MAIN_FONT_SIZE, bold=True)
+    title_cell.font = Font(name=MAIN_FONT_NAME, size=MAIN_FONT_SIZE, bold=True, color="FFFFFFFF")
+    title_cell.fill = PatternFill(start_color=HEADER_DARK_FILL_HEX, end_color=HEADER_DARK_FILL_HEX, fill_type="solid")
+    title_cell.alignment = Alignment(horizontal="left", vertical="center")
+    ws.row_dimensions[1].height = 24
 
     for col, text in enumerate(header_values[: len(SUMMARY_OUTPUT_COLUMNS)], start=1):
         cell = ws.cell(HEADER_ROW, col, text)
-        cell.font = Font(name=MAIN_FONT_NAME, size=MAIN_FONT_SIZE, bold=True)
+        cell.font = Font(name=MAIN_FONT_NAME, size=MAIN_FONT_SIZE, bold=True, color="FFFFFFFF")
         cell.alignment = DATA_ALIGNMENT
+        cell.fill = PatternFill(start_color=HEADER_DARK_FILL_HEX, end_color=HEADER_DARK_FILL_HEX, fill_type="solid")
+        cell.border = TABLE_BORDER
     ws.row_dimensions[HEADER_ROW].height = MAIN_ROW_HEIGHT
 
     for idx, row in enumerate(rows):
         row_num = DATA_START_ROW + idx
+        is_today = row["_出荷日付"] == today
         for col, name in enumerate(SUMMARY_OUTPUT_COLUMNS, start=1):
             value = cell_output_value(row, name)
             cell = ws.cell(row_num, col, value)
             cell.font = Font(name=MAIN_FONT_NAME, size=MAIN_FONT_SIZE)
             cell.alignment = DATA_ALIGNMENT
+            cell.border = TODAY_BORDER if is_today else TABLE_BORDER
 
         case_hex, _ = resolve_row_block_fills(str(row.get("案件名", "")), color_map, colors)
         fill = openpyxl_fill_from_hex(case_hex)
