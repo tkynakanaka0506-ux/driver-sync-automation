@@ -46,6 +46,7 @@
     "driver_block_fill_highlight": "#E6B9B8",
     "padding_end_row": 80
   },
+  "shipping_summary_debug_format": true,
   "sync_sharepoint": false,
   "sources": [
     {

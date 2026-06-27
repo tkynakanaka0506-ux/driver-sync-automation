@@ -150,6 +150,39 @@ def format_date_label(d: date) -> str:
     return f"{d.month}/{d.day}({WEEKDAY_LABELS[d.weekday()]})"
 
 
+def debug_dump_main_format(graph_token: str, config: dict[str, Any]) -> None:
+    """営業用Excelの実際の書式（中央揃え・行高さ・フォント等）をログに出す調査用。"""
+    import requests
+
+    od = config.get("onedrive_output", {})
+    remote_path = od.get("path", "/ドライバー情報/ドライバー情報_営業用.xlsx")
+    sheet_name = od.get("sheet_name", "ドライバー情報")
+    item = graph_get_drive_item(graph_token, remote_path)
+    item_id = item["id"]
+    from driver_sync import GRAPH_BASE, worksheet_segment
+
+    seg = worksheet_segment(sheet_name)
+    headers = {"Authorization": f"Bearer {graph_token}"}
+    for col in "ABCDEFG":
+        addr = f"{col}7"
+        fmt_url = f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/{seg}/range(address='{addr}')/format"
+        font_url = f"{fmt_url}/font"
+        fmt_res = requests.get(fmt_url, headers=headers, timeout=60)
+        font_res = requests.get(font_url, headers=headers, timeout=60)
+        logging.info(
+            "書式調査 %s: format=%s font=%s",
+            addr,
+            json.dumps(fmt_res.json(), ensure_ascii=False) if fmt_res.ok else fmt_res.status_code,
+            json.dumps(font_res.json(), ensure_ascii=False) if font_res.ok else font_res.status_code,
+        )
+    row_url = f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/{seg}/range(address='A7:A7')/format"
+    row_res = requests.get(row_url, headers=headers, timeout=60)
+    logging.info(
+        "書式調査 行高さ(A7 format): %s",
+        json.dumps(row_res.json(), ensure_ascii=False) if row_res.ok else row_res.status_code,
+    )
+
+
 def fetch_main_header_row(graph_token: str, config: dict[str, Any]) -> list[str]:
     """営業用Excelの6行目（A6:G6）の見出しをそのままコピーする。"""
     od = config.get("onedrive_output", {})
@@ -262,6 +295,8 @@ def run_summary(dry_run: bool = False, force_login: bool = False) -> int:
             scopes=GRAPH_SCOPES,
             force_login=force_login,
         )
+        if config.get("shipping_summary_debug_format"):
+            debug_dump_main_format(graph_token, config)
         header_values = fetch_main_header_row(graph_token, config)
         content = build_summary_xlsx_bytes(ship_rows, header_values, today, window_end, config)
         remote_path = config.get("shipping_summary_path", DEFAULT_OUTPUT_PATH)
