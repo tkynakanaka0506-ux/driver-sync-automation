@@ -150,37 +150,14 @@ def format_date_label(d: date) -> str:
     return f"{d.month}/{d.day}({WEEKDAY_LABELS[d.weekday()]})"
 
 
-def debug_dump_main_format(graph_token: str, config: dict[str, Any]) -> None:
-    """営業用Excelの実際の書式（中央揃え・行高さ・フォント等）をログに出す調査用。"""
-    import requests
-
-    od = config.get("onedrive_output", {})
-    remote_path = od.get("path", "/ドライバー情報/ドライバー情報_営業用.xlsx")
-    sheet_name = od.get("sheet_name", "ドライバー情報")
-    item = graph_get_drive_item(graph_token, remote_path)
-    item_id = item["id"]
-    from driver_sync import GRAPH_BASE, worksheet_segment
-
-    seg = worksheet_segment(sheet_name)
-    headers = {"Authorization": f"Bearer {graph_token}"}
-    for col in "ABCDEFG":
-        addr = f"{col}7"
-        fmt_url = f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/{seg}/range(address='{addr}')/format"
-        font_url = f"{fmt_url}/font"
-        fmt_res = requests.get(fmt_url, headers=headers, timeout=60)
-        font_res = requests.get(font_url, headers=headers, timeout=60)
-        logging.info(
-            "書式調査 %s: format=%s font=%s",
-            addr,
-            json.dumps(fmt_res.json(), ensure_ascii=False) if fmt_res.ok else fmt_res.status_code,
-            json.dumps(font_res.json(), ensure_ascii=False) if font_res.ok else font_res.status_code,
-        )
-    row_url = f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/{seg}/range(address='A7:A7')/format"
-    row_res = requests.get(row_url, headers=headers, timeout=60)
-    logging.info(
-        "書式調査 行高さ(A7 format): %s",
-        json.dumps(row_res.json(), ensure_ascii=False) if row_res.ok else row_res.status_code,
-    )
+# 営業用Excel データ行(7行目)の実書式をGraph APIで調査した結果（2026-06-27確認）。
+# 全列とも 中央揃え(横・縦)・折り返し表示・Meiryo 13pt・行高さ81.75pt で統一されている。
+MAIN_FONT_NAME = "Meiryo"
+MAIN_FONT_SIZE = 13.0
+MAIN_ROW_HEIGHT = 81.75
+DATA_ALIGNMENT = Alignment(horizontal="center", vertical="center", wrap_text=True)
+# 列幅(pt)を実書式から取得し、openpyxlの文字幅単位に変換（目安: pt/7）
+MAIN_COLUMN_WIDTH_PT = {"A": 113.25, "B": 264.0, "C": 74.25, "D": 78.0, "E": 119.25, "F": 355.5, "G": 126.75}
 
 
 def fetch_main_header_row(graph_token: str, config: dict[str, Any]) -> list[str]:
@@ -218,38 +195,31 @@ def build_summary_xlsx_bytes(
         f"（表示範囲: {format_date_label(today)}〜{format_date_label(window_end)}・"
         f"{len(rows)}件）"
     )
-    ws["A1"].font = Font(bold=True)
+    ws["A1"].font = Font(name=MAIN_FONT_NAME, size=MAIN_FONT_SIZE, bold=True)
 
     for col, text in enumerate(header_values[: len(SUMMARY_OUTPUT_COLUMNS)], start=1):
         cell = ws.cell(HEADER_ROW, col, text)
-        cell.font = Font(bold=True)
+        cell.font = Font(name=MAIN_FONT_NAME, size=MAIN_FONT_SIZE, bold=True)
+        cell.alignment = DATA_ALIGNMENT
+    ws.row_dimensions[HEADER_ROW].height = MAIN_ROW_HEIGHT
 
     for idx, row in enumerate(rows):
         row_num = DATA_START_ROW + idx
         for col, name in enumerate(SUMMARY_OUTPUT_COLUMNS, start=1):
             value = cell_output_value(row, name)
             cell = ws.cell(row_num, col, value)
-            if name in ("案件名", "備考", "型式"):
-                cell.alignment = Alignment(wrap_text=True, vertical="top")
+            cell.font = Font(name=MAIN_FONT_NAME, size=MAIN_FONT_SIZE)
+            cell.alignment = DATA_ALIGNMENT
 
         case_hex, _ = resolve_row_block_fills(str(row.get("案件名", "")), color_map, colors)
         fill = openpyxl_fill_from_hex(case_hex)
         for col in range(case_min, case_max + 1):
             ws.cell(row_num, col).fill = fill
 
-        line_count = max(
-            1,
-            *(str(row.get(f, "")).count("\n") + 1 for f in ("案件名", "備考", "型式")),
-        )
-        ws.row_dimensions[row_num].height = max(20, 18 * line_count)
+        ws.row_dimensions[row_num].height = MAIN_ROW_HEIGHT
 
-    ws.column_dimensions["A"].width = 14
-    ws.column_dimensions["B"].width = 30
-    ws.column_dimensions["C"].width = 10
-    ws.column_dimensions["D"].width = 10
-    ws.column_dimensions["E"].width = 24
-    ws.column_dimensions["F"].width = 16
-    ws.column_dimensions["G"].width = 16
+    for col_letter, width_pt in MAIN_COLUMN_WIDTH_PT.items():
+        ws.column_dimensions[col_letter].width = round(width_pt / 7, 1)
 
     buf = BytesIO()
     wb.save(buf)
@@ -295,8 +265,6 @@ def run_summary(dry_run: bool = False, force_login: bool = False) -> int:
             scopes=GRAPH_SCOPES,
             force_login=force_login,
         )
-        if config.get("shipping_summary_debug_format"):
-            debug_dump_main_format(graph_token, config)
         header_values = fetch_main_header_row(graph_token, config)
         content = build_summary_xlsx_bytes(ship_rows, header_values, today, window_end, config)
         remote_path = config.get("shipping_summary_path", DEFAULT_OUTPUT_PATH)
