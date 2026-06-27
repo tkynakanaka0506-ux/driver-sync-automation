@@ -3,3 +3,4 @@ token_cache.bin
 driver_sync_status.json
 debug_*.json
 __pycache__/
+sheet_password.txt

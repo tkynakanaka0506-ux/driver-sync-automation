@@ -39,6 +39,9 @@ from openpyxl.styles import PatternFill
 SCRIPT_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = SCRIPT_DIR / "driver_sync_config.json"
 TOKEN_CACHE_PATH = SCRIPT_DIR / "token_cache.bin"
+SHEET_PASSWORD_PATH = SCRIPT_DIR / "sheet_password.txt"
+SHEET_PASSWORD_ENV_VAR = "DRIVER_SYNC_SHEET_PASSWORD"
+PROTECTED_HIDDEN_COLUMN_NAMES = ("携帯番号",)  # 非表示+シート保護で隠す列
 LOG_PATH = SCRIPT_DIR / "driver_sync.log"
 TASK_LOG_PATH = SCRIPT_DIR / "driver_sync_task.log"
 STATUS_PATH = SCRIPT_DIR / "driver_sync_status.json"
@@ -2477,6 +2480,13 @@ def update_onedrive_values_only(
         data_start_row = int(od.get("data_start_row", 7))
         table_header_row = int(od.get("table_header_row", 6))
         col_map = load_output_column_map(config)
+
+        sheet_password = load_sheet_password()
+        if sheet_password:
+            graph_unprotect_worksheet(
+                graph_token, item_id, ws_name, session_id, sheet_password
+            )
+
         row_count = len(rows)
         data_end_row = output_data_end_row(data_start_row, row_count)
         previous_end_row = load_last_patched_end_row(data_start_row)
@@ -2661,6 +2671,23 @@ def update_onedrive_values_only(
             encoding="utf-8",
         )
         logging.info("API詳細を保存: %s", API_DEBUG_PATH.name)
+
+        if sheet_password:
+            for hidden_col_name in PROTECTED_HIDDEN_COLUMN_NAMES:
+                hidden_col = col_map.get(hidden_col_name)
+                if hidden_col:
+                    graph_set_column_width(
+                        graph_token, item_id, ws_name,
+                        col_letter_from_index(hidden_col), 0, session_id,
+                    )
+            graph_protect_worksheet(
+                graph_token, item_id, ws_name, session_id, sheet_password
+            )
+            logging.info(
+                "シート保護を再適用（非表示列: %s）",
+                ", ".join(PROTECTED_HIDDEN_COLUMN_NAMES),
+            )
+
         return data_end_row, sheet_used_end_row
     finally:
         graph_close_workbook_session(graph_token, item_id, session_id)
@@ -3129,6 +3156,73 @@ class SharePointRestClient:
         res = requests.post(url, headers=headers, json=body, timeout=60)
         if not res.ok:
             raise RuntimeError(f"項目作成失敗: {res.status_code} {res.text[:300]}")
+
+
+def load_sheet_password() -> str:
+    """シート保護用パスワードを環境変数→ローカルファイルの順で読む。"""
+    env_value = os.environ.get(SHEET_PASSWORD_ENV_VAR, "").strip()
+    if env_value:
+        return env_value
+    if SHEET_PASSWORD_PATH.exists():
+        return SHEET_PASSWORD_PATH.read_text(encoding="utf-8").strip()
+    return ""
+
+
+def graph_set_column_width(
+    graph_token: str,
+    item_id: str,
+    sheet_name: str,
+    column_letter: str,
+    width: float,
+    session_id: str,
+) -> None:
+    seg = worksheet_segment(sheet_name)
+    url = (
+        f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/"
+        f"{seg}/range(address='{column_letter}:{column_letter}')/format"
+    )
+    graph_request_with_retry(
+        "PATCH", url, graph_token, session_id=session_id,
+        json={"columnWidth": width},
+    )
+
+
+def graph_unprotect_worksheet(
+    graph_token: str,
+    item_id: str,
+    sheet_name: str,
+    session_id: str,
+    password: str,
+) -> None:
+    seg = worksheet_segment(sheet_name)
+    url = f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/{seg}/protection/unprotect"
+    res = graph_request_with_retry(
+        "POST", url, graph_token, session_id=session_id,
+        json={"password": password} if password else {},
+    )
+    if not res.ok and res.status_code != 400:
+        raise RuntimeError(
+            f"シート保護解除失敗: {res.status_code} {res.text[:200]}"
+        )
+
+
+def graph_protect_worksheet(
+    graph_token: str,
+    item_id: str,
+    sheet_name: str,
+    session_id: str,
+    password: str,
+) -> None:
+    seg = worksheet_segment(sheet_name)
+    url = f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/{seg}/protection/protect"
+    body: dict[str, Any] = {"options": {"allowFormatColumns": False}}
+    if password:
+        body["password"] = password
+    res = graph_request_with_retry(
+        "POST", url, graph_token, session_id=session_id, json=body,
+    )
+    if not res.ok:
+        raise RuntimeError(f"シート保護失敗: {res.status_code} {res.text[:200]}")
 
 
 def build_token_cache() -> msal.SerializableTokenCache:
