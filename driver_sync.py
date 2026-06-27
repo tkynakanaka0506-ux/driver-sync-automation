@@ -83,12 +83,13 @@ EXCEL_OUTPUT_COLUMNS = [
     "乗務員",
     "車番",
     "携帯番号",
+    "依頼先",
 ]
 # ---------------------------------------------------------------------------
 # 出力Excel 行色（A〜E=案件情報 / F〜K=★ドライバー情報★）
 # ---------------------------------------------------------------------------
 CASE_BLOCK_COLUMN_NAMES = ("案件No", "案件名", "出荷日", "着日", "備考", "型式")
-DRIVER_BLOCK_COLUMN_NAMES = ("車型", "会社名", "乗務員", "車番", "携帯番号")
+DRIVER_BLOCK_COLUMN_NAMES = ("車型", "会社名", "乗務員", "車番", "携帯番号", "依頼先")
 
 HIGHLIGHT_CASE_NAMES = (
     "㈱丸運　羽田京浜物流センター",
@@ -126,6 +127,12 @@ GRAPH_SCOPES = [
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 
 SOURCE_ORDER = ["matsuzaki", "nakadori", "fukuoka", "maruun"]
+SOURCE_DISPLAY_NAMES = {
+    "matsuzaki": "松崎運輸",
+    "nakadori": "中通",
+    "fukuoka": "福岡ロジテック",
+    "maruun": "丸運",
+}
 DEBUG_OUTPUT_PATH = SCRIPT_DIR / "debug_extract_output.json"
 API_DEBUG_PATH = SCRIPT_DIR / "debug_api_last.json"
 
@@ -1696,7 +1703,11 @@ def rows_to_xlsx_bytes(rows: list[dict[str, Any]], config: dict[str, Any] | None
 
 def cell_output_value(row: dict[str, Any], col_name: str) -> Any:
     value = row.get(col_name, "")
-    return "" if value is None else value
+    if value is None:
+        return ""
+    if col_name == "依頼先":
+        return SOURCE_DISPLAY_NAMES.get(str(value), str(value))
+    return value
 
 
 def load_last_data_rows() -> int:
