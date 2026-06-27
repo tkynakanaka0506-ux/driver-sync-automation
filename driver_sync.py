@@ -30,6 +30,7 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any
 
+import jpholiday
 import msal
 import openpyxl
 import requests
@@ -916,7 +917,13 @@ def arr_window_start(today: date, days_back: int) -> date:
 
 
 def arr_window_end(today: date) -> date:
-    """着日上限: 明後日（暦日）。"""
+    """着日上限: 明後日（暦日）。ただし今日が金曜日の場合は、土日を挟むため
+    月曜（祝日なら火曜）まで延長する。"""
+    if today.weekday() == 4:  # 0=月 ... 4=金
+        monday = today + timedelta(days=3)
+        if jpholiday.is_holiday(monday):
+            return monday + timedelta(days=1)
+        return monday
     return today + timedelta(days=2)
 
 
