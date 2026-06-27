@@ -41,7 +41,9 @@ CONFIG_PATH = SCRIPT_DIR / "driver_sync_config.json"
 TOKEN_CACHE_PATH = SCRIPT_DIR / "token_cache.bin"
 SHEET_PASSWORD_PATH = SCRIPT_DIR / "sheet_password.txt"
 SHEET_PASSWORD_ENV_VAR = "DRIVER_SYNC_SHEET_PASSWORD"
-PROTECTED_HIDDEN_COLUMN_NAMES = ("携帯番号",)  # 非表示+シート保護で隠す列
+PROTECTED_HIDDEN_COLUMN_NAMES = ("携帯番号秘",)  # 非表示+シート保護で隠す列
+MASKED_COLUMN_NAMES = ("携帯番号",)  # 見える列だが値は***でマスクする
+MASK_TEXT = "***"
 LOG_PATH = SCRIPT_DIR / "driver_sync.log"
 TASK_LOG_PATH = SCRIPT_DIR / "driver_sync_task.log"
 STATUS_PATH = SCRIPT_DIR / "driver_sync_status.json"
@@ -87,14 +89,15 @@ EXCEL_OUTPUT_COLUMNS = [
     "車番",
     "携帯番号",
     "依頼先",
+    "携帯番号秘",
 ]
 # ---------------------------------------------------------------------------
 # 出力Excel 行色（A〜E=案件情報 / F〜K=★ドライバー情報★）
 # ---------------------------------------------------------------------------
 CASE_BLOCK_COLUMN_NAMES = ("案件No", "案件名", "出荷日", "着日", "備考", "型式")
 DRIVER_BLOCK_COLUMN_NAMES = ("車型", "会社名", "乗務員", "車番", "携帯番号")
-# 依頼先(L列)は色分け対象外。常に塗りつぶしなし（白）にする。
-WHITE_FILL_COLUMN_NAMES = ("依頼先",)
+# 依頼先・携帯番号秘は色分け対象外。常に塗りつぶしなし（白）にする。
+WHITE_FILL_COLUMN_NAMES = ("依頼先", "携帯番号秘")
 
 HIGHLIGHT_CASE_NAMES = (
     "㈱丸運　羽田京浜物流センター",
@@ -739,6 +742,7 @@ def append_record_from_row_tuple(
             "乗務員": driver["driver"],
             "車番": driver["plate"],
             "携帯番号": driver["phone"],
+            "携帯番号秘": driver["phone"],
             "備考": remarks,
             "中継あり": has_relay,
             "依頼先": config_key,
@@ -1723,6 +1727,8 @@ def cell_output_value(row: dict[str, Any], col_name: str) -> Any:
         return ""
     if col_name == "依頼先":
         return SOURCE_DISPLAY_NAMES.get(str(value), str(value))
+    if col_name in MASKED_COLUMN_NAMES:
+        return MASK_TEXT if str(value).strip() else ""
     return value
 
 
