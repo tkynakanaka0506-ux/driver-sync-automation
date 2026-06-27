@@ -2766,7 +2766,22 @@ ISSUE_CATEGORY_KEYWORDS = [
 ISSUE_CASE_NO_PATTERN = re.compile(r"\b[A-Z][A-Z0-9]{3,9}-\d{1,2}\b")
 ISSUE_CASE_AFTER_LABEL_PATTERN = re.compile(r"案件=([^\s]+)")
 ISSUE_SHIP_DATE_PATTERN = re.compile(r"出荷日=([\d/]+)")
+ISSUE_SOURCE_KEY_PATTERN = re.compile(r"\b(matsuzaki|nakadori|fukuoka|maruun)\b")
+ISSUE_SOURCE_ABBREV = {
+    "matsuzaki": "松崎",
+    "nakadori": "中通",
+    "fukuoka": "福岡ロジ",
+    "maruun": "丸運",
+}
 E3_MAX_LEN = 40  # セルに収まる目安の文字数。超えたらE4に続きを出す。
+
+
+def extract_source_abbrev(msg: str) -> str:
+    """警告メッセージから依頼先(略称)を取り出す。不明なら空文字。"""
+    match = ISSUE_SOURCE_KEY_PATTERN.search(msg)
+    if not match:
+        return ""
+    return ISSUE_SOURCE_ABBREV.get(match.group(1), "")
 
 
 def extract_case_no(msg: str) -> str | None:
@@ -2781,15 +2796,16 @@ def extract_case_no(msg: str) -> str | None:
 
 
 def extract_issue_entry(msg: str) -> str | None:
-    """「出荷日 / 案件No」形式のエントリを作る（出荷日が無ければ案件Noのみ）。"""
+    """「依頼先+出荷日 / 案件No」形式のエントリを作る（例: 中通6.29 / W25A392-01）。"""
     case_no = extract_case_no(msg)
     if not case_no:
         return None
+    abbrev = extract_source_abbrev(msg)
     date_match = ISSUE_SHIP_DATE_PATTERN.search(msg)
     if date_match:
         ship_md = date_match.group(1).replace("/", ".")
-        return f"{ship_md} / {case_no}"
-    return case_no
+        return f"{abbrev}{ship_md} / {case_no}"
+    return f"{abbrev}{case_no}" if abbrev else case_no
 
 
 IGNORE_LIST_RANGE = "G3:H4"  # G3〜H4の4セル。1セルに1案件Noを入力する。
