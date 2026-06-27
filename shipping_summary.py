@@ -31,7 +31,9 @@ from driver_sync import (
     extract_rows_from_workbook,
     graph_get_drive_item,
     graph_read_range_values,
+    load_case_name_row_color_map,
     load_config,
+    normalize_case_name_key,
     openpyxl_fill_from_hex,
     prepare_rows_for_output,
     release_process_lock,
@@ -157,9 +159,17 @@ DATA_ALIGNMENT = Alignment(horizontal="center", vertical="center", wrap_text=Tru
 MAIN_COLUMN_WIDTH_PT = {"A": 113.25, "B": 264.0, "C": 74.25, "D": 78.0, "E": 119.25, "F": 355.5, "G": 126.75}
 # 案件情報の塗り色は若干グレーで統一（営業用Excelの案件名別ハイライトは使わない）
 CASE_INFO_FILL_HEX = "#EDEDED"
-# 横持ち（案件名に「横持」を含む案件）は少し濃いグレーで区別する
+# 横持ち（案件名に「横持」を含む案件）と、営業用Excelで強調指定されている案件名
+# （driver_sync_config.json の row_colors_by_case_name、ユーザー編集済みなので
+# キー自体は変更しない）は少し濃いグレーで区別する
 YOKOMOCHI_FILL_HEX = "#BFBFBF"
 YOKOMOCHI_KEYWORD = "横持"
+
+
+def is_darkened_case(case_name: str, highlight_keys: set[str]) -> bool:
+    if YOKOMOCHI_KEYWORD in case_name:
+        return True
+    return normalize_case_name_key(case_name) in highlight_keys
 # 出荷日ごとの区切り見出し行（黒背景・白文字）
 DATE_HEADER_FILL_HEX = "FF000000"
 DATE_HEADER_FONT = Font(name=MAIN_FONT_NAME, size=MAIN_FONT_SIZE, bold=True, color="FFFFFFFF")
@@ -214,6 +224,7 @@ def build_summary_xlsx_bytes(
 ) -> bytes:
     """営業用Excelと同じA〜G列構成（6行目=見出し、7行目〜=データ）で出力する。"""
     case_min, case_max = 1, len(SUMMARY_OUTPUT_COLUMNS)
+    highlight_keys = set(load_case_name_row_color_map(config).keys())
 
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -251,14 +262,14 @@ def build_summary_xlsx_bytes(
         row_num += 1
 
         for day_row in day_rows:
-            is_yokomochi = YOKOMOCHI_KEYWORD in str(day_row.get("案件名", ""))
+            darken = is_darkened_case(str(day_row.get("案件名", "")), highlight_keys)
             for col, name in enumerate(SUMMARY_OUTPUT_COLUMNS, start=1):
                 value = cell_output_value(day_row, name)
                 cell = ws.cell(row_num, col, value)
                 cell.font = Font(name=MAIN_FONT_NAME, size=MAIN_FONT_SIZE)
                 cell.alignment = DATA_ALIGNMENT
 
-            fill = openpyxl_fill_from_hex(YOKOMOCHI_FILL_HEX if is_yokomochi else CASE_INFO_FILL_HEX)
+            fill = openpyxl_fill_from_hex(YOKOMOCHI_FILL_HEX if darken else CASE_INFO_FILL_HEX)
             for col in range(case_min, case_max + 1):
                 ws.cell(row_num, col).fill = fill
                 ws.cell(row_num, col).border = TABLE_BORDER
