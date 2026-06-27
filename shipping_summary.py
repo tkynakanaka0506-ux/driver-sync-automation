@@ -26,12 +26,19 @@ from driver_sync import (
     JST,
     acquire_process_lock,
     acquire_token,
+    cell_output_value,
     download_share_file,
     extract_rows_from_workbook,
+    graph_get_drive_item,
+    graph_read_range_values,
     is_unattended,
+    load_case_name_row_color_map,
     load_config,
+    load_output_row_colors,
+    openpyxl_fill_from_hex,
     prepare_rows_for_output,
     release_process_lock,
+    resolve_row_block_fills,
     rotate_log_if_needed,
     setup_logging,
     upload_onedrive_excel,
@@ -47,9 +54,10 @@ DEFAULT_OUTPUT_PATH = "/ドライバー情報/出荷日別案件サマリー.xls
 DEFAULT_SHEET_NAME = "出荷日サマリー"
 DEFAULT_DAYS_AHEAD = 3
 
-HEADER_FILL_HEX = "FFD9E1F2"
-TODAY_FILL_HEX = "FFFFF2CC"
-ZERO_FILL_HEX = "FFF2F2F2"
+# 営業用Excelと同じ列構成（A〜G）をそのまま使う
+SUMMARY_OUTPUT_COLUMNS = ["案件No", "案件名", "出荷日", "着日", "備考", "型式", "車型"]
+HEADER_ROW = 6
+DATA_START_ROW = 7
 
 
 def ship_window_end(today: date, days_ahead: int = DEFAULT_DAYS_AHEAD) -> date:
@@ -131,82 +139,85 @@ def filter_rows_by_ship_window(
     return filtered
 
 
-def group_by_ship_date(
-    rows: list[dict[str, Any]], today: date, window_end: date
-) -> list[dict[str, Any]]:
-    """today〜window_end の全日付について（件数0の日も含めて）まとめる。"""
-    by_date: dict[date, list[dict[str, Any]]] = {}
-    for row in rows:
-        by_date.setdefault(row["_出荷日付"], []).append(row)
-
-    result: list[dict[str, Any]] = []
-    d = today
-    while d <= window_end:
-        day_rows = by_date.get(d, [])
-        case_lines = [
-            f"{r.get('案件No', '')} {r.get('案件名', '')}".strip()
-            for r in sorted(day_rows, key=lambda r: str(r.get("案件No", "")))
-        ]
-        result.append(
-            {
-                "date": d,
-                "count": len(day_rows),
-                "case_lines": case_lines,
-            }
-        )
-        d += timedelta(days=1)
-    return result
+def sort_rows_by_ship_date(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """出荷日の昇順（同日内は案件No順）に並べ替える。"""
+    return sorted(
+        rows,
+        key=lambda r: (r["_出荷日付"], str(r.get("案件No", ""))),
+    )
 
 
 def format_date_label(d: date) -> str:
     return f"{d.month}/{d.day}({WEEKDAY_LABELS[d.weekday()]})"
 
 
+def fetch_main_header_row(graph_token: str, config: dict[str, Any]) -> list[str]:
+    """営業用Excelの6行目（A6:G6）の見出しをそのままコピーする。"""
+    od = config.get("onedrive_output", {})
+    remote_path = od.get("path", "/ドライバー情報/ドライバー情報_営業用.xlsx")
+    sheet_name = od.get("sheet_name", "ドライバー情報")
+    item = graph_get_drive_item(graph_token, remote_path)
+    item_id = item["id"]
+    address = f"A{HEADER_ROW}:G{HEADER_ROW}"
+    values = graph_read_range_values(graph_token, item_id, sheet_name, address, session_id=None)
+    if values and values[0]:
+        return [str(v) if v is not None else "" for v in values[0]]
+    return list(SUMMARY_OUTPUT_COLUMNS)
+
+
 def build_summary_xlsx_bytes(
-    daily_summary: list[dict[str, Any]], today: date, window_end: date
+    rows: list[dict[str, Any]],
+    header_values: list[str],
+    today: date,
+    window_end: date,
+    config: dict[str, Any],
 ) -> bytes:
+    """営業用Excelと同じA〜G列構成（6行目=見出し、7行目〜=データ）で出力する。"""
+    color_map = load_case_name_row_color_map(config)
+    colors = load_output_row_colors(config)
+    case_min, case_max = 1, len(SUMMARY_OUTPUT_COLUMNS)
+
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = DEFAULT_SHEET_NAME
 
     ws["A1"] = (
         f"最終更新: {datetime.now(JST).strftime('%Y/%m/%d %H:%M')}　"
-        f"（表示範囲: {format_date_label(today)}〜{format_date_label(window_end)}）"
+        f"（表示範囲: {format_date_label(today)}〜{format_date_label(window_end)}・"
+        f"{len(rows)}件）"
     )
     ws["A1"].font = Font(bold=True)
 
-    headers = ["出荷日", "件数", "案件一覧（案件No 案件名）"]
-    header_row = 3
-    for col, text in enumerate(headers, start=1):
-        cell = ws.cell(header_row, col, text)
+    for col, text in enumerate(header_values[: len(SUMMARY_OUTPUT_COLUMNS)], start=1):
+        cell = ws.cell(HEADER_ROW, col, text)
         cell.font = Font(bold=True)
-        cell.fill = PatternFill(start_color=HEADER_FILL_HEX, end_color=HEADER_FILL_HEX, fill_type="solid")
 
-    for idx, day in enumerate(daily_summary):
-        row_num = header_row + 1 + idx
-        d: date = day["date"]
-        ws.cell(row_num, 1, format_date_label(d))
-        ws.cell(row_num, 2, day["count"])
-        ws.cell(row_num, 3, "\n".join(day["case_lines"]))
-        ws.cell(row_num, 3).alignment = Alignment(wrap_text=True, vertical="top")
+    for idx, row in enumerate(rows):
+        row_num = DATA_START_ROW + idx
+        for col, name in enumerate(SUMMARY_OUTPUT_COLUMNS, start=1):
+            value = cell_output_value(row, name)
+            cell = ws.cell(row_num, col, value)
+            if name in ("案件名", "備考", "型式"):
+                cell.alignment = Alignment(wrap_text=True, vertical="top")
 
-        if d == today:
-            fill_hex = TODAY_FILL_HEX
-        elif day["count"] == 0:
-            fill_hex = ZERO_FILL_HEX
-        else:
-            fill_hex = None
-        if fill_hex:
-            fill = PatternFill(start_color=fill_hex, end_color=fill_hex, fill_type="solid")
-            for col in range(1, 4):
-                ws.cell(row_num, col).fill = fill
+        case_hex, _ = resolve_row_block_fills(str(row.get("案件名", "")), color_map, colors)
+        fill = openpyxl_fill_from_hex(case_hex)
+        for col in range(case_min, case_max + 1):
+            ws.cell(row_num, col).fill = fill
 
-        line_count = max(1, len(day["case_lines"]))
-        ws.row_dimensions[row_num].height = max(20, 15 * line_count)
+        line_count = max(
+            1,
+            *(str(row.get(f, "")).count("\n") + 1 for f in ("案件名", "備考", "型式")),
+        )
+        ws.row_dimensions[row_num].height = max(20, 18 * line_count)
 
     ws.column_dimensions["A"].width = 14
-    ws.column_dimensions["B"].width = 8
-    ws.column_dimensions["C"].width = 80
+    ws.column_dimensions["B"].width = 30
+    ws.column_dimensions["C"].width = 10
+    ws.column_dimensions["D"].width = 10
+    ws.column_dimensions["E"].width = 24
+    ws.column_dimensions["F"].width = 16
+    ws.column_dimensions["G"].width = 16
 
     buf = BytesIO()
     wb.save(buf)
@@ -235,27 +246,28 @@ def run_summary(dry_run: bool = False, force_login: bool = False) -> int:
 
         all_rows = collect_all_rows(config, today)
         ship_rows = filter_rows_by_ship_window(all_rows, today, window_end)
-        daily_summary = group_by_ship_date(ship_rows, today, window_end)
+        ship_rows = sort_rows_by_ship_date(ship_rows)
 
-        for day in daily_summary:
-            logging.info(
-                "%s: %d件", format_date_label(day["date"]), day["count"]
-            )
+        counts: dict[date, int] = {}
+        for row in ship_rows:
+            counts[row["_出荷日付"]] = counts.get(row["_出荷日付"], 0) + 1
+        for d, count in sorted(counts.items()):
+            logging.info("%s: %d件", format_date_label(d), count)
 
         if dry_run:
             logging.info("dry-run のため OneDrive 反映はスキップしました")
             return 0
-
-        content = build_summary_xlsx_bytes(daily_summary, today, window_end)
-        remote_path = config.get("shipping_summary_path", DEFAULT_OUTPUT_PATH)
 
         graph_token = acquire_token(
             config,
             scopes=GRAPH_SCOPES,
             force_login=force_login,
         )
+        header_values = fetch_main_header_row(graph_token, config)
+        content = build_summary_xlsx_bytes(ship_rows, header_values, today, window_end, config)
+        remote_path = config.get("shipping_summary_path", DEFAULT_OUTPUT_PATH)
         upload_onedrive_excel(graph_token, remote_path, content)
-        logging.info("出荷日サマリーを更新しました: %s", remote_path)
+        logging.info("出荷日サマリーを更新しました: %s (%d件)", remote_path, len(ship_rows))
         return 0
     except Exception as exc:
         logging.exception("出荷日サマリー更新失敗: %s", exc)

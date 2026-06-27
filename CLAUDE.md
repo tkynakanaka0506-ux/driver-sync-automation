@@ -85,7 +85,11 @@ Graph API認証・token_cache.bin をそのまま再利用している（認証�
   あれば、その祝日の翌日まで再延長する（連休にも対応、`ship_window_end()`）。
 - 出荷日の判定は `driver_sync.py` の着日フィルタとは独立（着日範囲は広く
   取った上で、出荷日側だけで表示範囲を絞り込む）。
-- 件数0件の日も行として表示する（薄い灰色）。当日行は黄色でハイライト。
+- 出力レイアウトは営業用Excelと同じ列構成（A〜G = 案件No/案件名/出荷日/着日/
+  備考/型式/車型）。見出し行（6行目）は営業用ExcelのA6:G6をGraph APIで読んで
+  そのままコピーし、7行目から出荷日昇順でデータ行を書き込む
+  （`fetch_main_header_row()` / `build_summary_xlsx_bytes()`）。
+  件数は日付ごとの行数で読み取れる（個別の件数列は持たない）。
 - 実行トリガー: `.github/workflows/shipping_summary.yml`（GitHub Actions
   `schedule: "0 * * * *"` + `workflow_dispatch`）。GitHub Actions単体のcronは
   最大1〜2時間遅延することがある（[[driver-sync-incidents]]参照）ため、
