@@ -23,7 +23,7 @@ import re
 import sys
 import time
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, time as dt_time, timedelta, timezone
 
 JST = timezone(timedelta(hours=9))
 from io import BytesIO
@@ -897,7 +897,7 @@ def format_time_value(raw: Any) -> str:
         return ""
     if isinstance(raw, datetime):
         return raw.strftime("%H:%M")
-    if isinstance(raw, time):
+    if isinstance(raw, dt_time):
         return raw.strftime("%H:%M")
     if isinstance(raw, (int, float)):
         total_minutes = round(raw * 24 * 60)
