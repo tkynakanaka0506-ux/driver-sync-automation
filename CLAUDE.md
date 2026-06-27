@@ -70,4 +70,26 @@ cron-job.org (15分ごとHTTP POST)
 
 このリポジトリは `C:\Users\1229\Desktop\AI関連－仮保存フォルダ\driver_sync.py` のコピー。
 ローカル側を直して動作確認したら、必ずこちらにもコピーしてpushすること
-（クラウド側はこのリポジトリの内容だけを実行する）。
+（クラウド側はこのリポジトリの内容だけを実行する）。`shipping_summary.py` も同様。
+
+## 出荷日別案件サマリー（shipping_summary.py）
+
+`driver_sync.py` と同じ4社の元データを再集計し、OneDrive上の別Excel
+`/ドライバー情報/出荷日別案件サマリー.xlsx`（シート名: 出荷日サマリー）へ
+1時間ごとに「出荷日・件数・案件一覧」を書き込む。`driver_sync.py` の抽出関数・
+Graph API認証・token_cache.bin をそのまま再利用している（認証情報は共有）。
+
+- 表示範囲: 当日から3日先まで（`driver_sync_config.json` の
+  `shipping_summary_days_ahead` で変更可、未設定時は3）。
+- 当日が金曜日の場合は土日を挟むため火曜まで延長。延長後の範囲内に祝日が
+  あれば、その祝日の翌日まで再延長する（連休にも対応、`ship_window_end()`）。
+- 出荷日の判定は `driver_sync.py` の着日フィルタとは独立（着日範囲は広く
+  取った上で、出荷日側だけで表示範囲を絞り込む）。
+- 件数0件の日も行として表示する（薄い灰色）。当日行は黄色でハイライト。
+- 実行トリガー: `.github/workflows/shipping_summary.yml`（GitHub Actions
+  `schedule: "0 * * * *"` + `workflow_dispatch`）。GitHub Actions単体のcronは
+  最大1〜2時間遅延することがある（[[driver-sync-incidents]]参照）ため、
+  既存と同様に外部cronサービス（cron-job.org等）から1時間ごとに
+  `workflow_dispatch` をHTTP POSTで叩く設定を別途追加すること
+  （URL: `.../actions/workflows/shipping_summary.yml/dispatches`、
+  ヘッダー・PATは既存の`driver-sync`ジョブと同じものを使い回せる）。
