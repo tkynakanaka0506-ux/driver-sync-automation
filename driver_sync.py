@@ -263,8 +263,12 @@ def setup_logging(quiet_console: bool = False) -> None:
     handlers: list[logging.Handler] = [
         logging.FileHandler(LOG_PATH, encoding="utf-8"),
     ]
-    if not quiet_console:
-        handlers.append(logging.StreamHandler(sys.stdout))
+    console_handler = logging.StreamHandler(sys.stdout)
+    if quiet_console:
+        # 無人実行時は通常ログを抑制するが、警告・エラーはCI(GitHub Actions等)の
+        # ログで原因調査できるよう必ず出力する。
+        console_handler.setLevel(logging.WARNING)
+    handlers.append(console_handler)
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
