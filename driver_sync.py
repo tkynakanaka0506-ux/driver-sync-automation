@@ -44,6 +44,7 @@ SHEET_PASSWORD_ENV_VAR = "DRIVER_SYNC_SHEET_PASSWORD"
 PROTECTED_HIDDEN_COLUMN_NAMES = ("携帯番号秘",)  # 非表示+シート保護で隠す列
 MASKED_COLUMN_NAMES = ("携帯番号",)  # 見える列だが値は***でマスクする
 MASK_TEXT = "***"
+MASKED_COLUMN_WIDTH = 100.0  # 携帯番号列の通常表示幅
 LOG_PATH = SCRIPT_DIR / "driver_sync.log"
 TASK_LOG_PATH = SCRIPT_DIR / "driver_sync_task.log"
 STATUS_PATH = SCRIPT_DIR / "driver_sync_status.json"
@@ -2679,6 +2680,14 @@ def update_onedrive_values_only(
         logging.info("API詳細を保存: %s", API_DEBUG_PATH.name)
 
         if sheet_password:
+            for visible_col_name in MASKED_COLUMN_NAMES:
+                visible_col = col_map.get(visible_col_name)
+                if visible_col:
+                    graph_set_column_width(
+                        graph_token, item_id, ws_name,
+                        col_letter_from_index(visible_col),
+                        MASKED_COLUMN_WIDTH, session_id,
+                    )
             for hidden_col_name in PROTECTED_HIDDEN_COLUMN_NAMES:
                 hidden_col = col_map.get(hidden_col_name)
                 if hidden_col:
