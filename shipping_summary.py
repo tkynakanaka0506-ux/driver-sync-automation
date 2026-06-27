@@ -204,7 +204,7 @@ def group_rows_by_date(
 def fetch_main_header_row(graph_token: str, config: dict[str, Any]) -> list[str]:
     """営業用Excelの6行目（A6:G6）の見出しをそのままコピーする。"""
     od = config.get("onedrive_output", {})
-    remote_path = od.get("path", "/ドライバー情報/ドライバー情報_営業用.xlsx")
+    remote_path = od.get("path", "/ドライバー情報/ドライバー情報_営業用.xlsm")
     sheet_name = od.get("sheet_name", "ドライバー情報")
     item = graph_get_drive_item(graph_token, remote_path)
     item_id = item["id"]

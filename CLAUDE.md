@@ -1,7 +1,7 @@
 # driver-sync-automation
 
 OneDrive上の4社（matsuzaki/松崎運輸, nakadori/中通, fukuoka/福岡ロジテック, maruun/丸運）の
-車両依頼書・管理シートから案件・ドライバー情報を集計し、社内の「ドライバー情報_営業用.xlsx」
+車両依頼書・管理シートから案件・ドライバー情報を集計し、社内の「ドライバー情報_営業用.xlsm」
 （OneDrive上）へ書き込む自動同期システム。
 
 ## 仕組みの全体像
@@ -17,7 +17,7 @@ cron-job.org (15分ごとHTTP POST)
           - 出荷日が「過去7日〜翌日」の案件のみに絞る
           - 備考列に号車/着時間、中継ありなら2次配送情報を追記
           - ドライバー4項目未入力などの異常を警告として収集
-          - 「ドライバー情報_営業用.xlsx」へGraph API PATCHで一括書き込み
+          - 「ドライバー情報_営業用.xlsm」へGraph API PATCHで一括書き込み
           - 行の色分け（HIGHLIGHT_CASE_NAMES）、E1最終更新時刻（JST固定）、
             E2〜E4要確認アラート、F2:H4確認済み案件No除外を反映
       → 更新後のtoken_cache.binを再度暗号化してSecretsへ書き戻す（リフレッシュトークンローテーション対応）
@@ -48,12 +48,34 @@ cron-job.org (15分ごとHTTP POST)
   `graph_get_ignored_case_numbers` で整数化して吸収済み（修正済み、再発した場合はここを疑う）。
 - **`token_cache.bin` はGit管理外**（`.gitignore`）。ローカルで再生成・再アップロードする際は
   `driver_sync_config.json` の認証情報（client_id/tenant_id）と一致しているか確認。
+- **ファイル形式（拡張子）を変えると共有リンクが必ず変わる**: VBAマクロは`.xlsm`でしか保存できない
+  というExcel自体の制限があり、`.xlsx`→`.xlsm`変換は新しいOneDriveアイテムとして作られるため、
+  既存の匿名共有リンクは無効になり新しいリンクが発行される（復元不可・仕様上の制限）。
+  ファイル形式を変える作業は、リンクの再共有が必要になることを前提に進めること。
+
+## 携帯番号の保護（マスク表示＋VBAボタン）
+
+`ドライバー情報_営業用.xlsm`（マクロ有効ブック）で運用中。
+
+- K列（携帯番号）は常に表示されるが、値は`***`にマスクされる（`MASKED_COLUMN_NAMES`）
+- 本物の番号はM列（`携帯番号秘`、列幅0で非表示）に保存
+- シートはパスワード保護（`options.allowFormatColumns: false`等）。パスワードは
+  環境変数`DRIVER_SYNC_SHEET_PASWORD`→ローカルファイル`sheet_password.txt`（Git管理外）の順で読む。
+  GitHub Actionsでは`SHEET_PASSWORD`シークレットを`DRIVER_SYNC_SHEET_PASSWORD`として渡している。
+- `driver_sync.py`は毎回 unprotect → 書き込み → M列非表示+K列幅復元 → reprotect を繰り返す
+  （`graph_unprotect_worksheet` / `graph_protect_worksheet` / `graph_set_column_width`）。
+- シート上に「携帯番号を表示」ボタン（VBA `ShowMobileNumbers`マクロ）があり、パスワードを
+  入力するとM列を一時的に再表示できる。次回の自動同期（15分以内）で自動的に再び非表示に戻る。
+- VBAプロジェクトの追加はGraph APIでは不可なため、ローカルでExcel COM自動化
+  （`win32com.client`、要: Excelの「VBAプロジェクトオブジェクトモデルへのアクセスを信頼する」設定）
+  を使って一度だけ手動で組み込んだ。再度VBAを変更する場合も同じ手順が必要。
 
 ## 関連シークレット（このリポジトリのGitHub Secrets）
 
 - `TOKEN_CACHE_B64`: MSALトークンキャッシュのbase64（driver_sync.py実行用、自動更新される）
 - `SECRETS_PAT`: ワークフロー内で`TOKEN_CACHE_B64`を書き戻すための fine-grained PAT
   （このリポジトリのみ、Secrets: Read and write）
+- `SHEET_PASSWORD`: 携帯番号列のシート保護パスワード（`DRIVER_SYNC_SHEET_PASSWORD`として渡す）
 
 ## 外部サービス側の設定（cron-job.org、コード管理外）
 
