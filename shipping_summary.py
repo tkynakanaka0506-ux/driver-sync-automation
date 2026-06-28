@@ -479,11 +479,12 @@ def write_summary_via_graph(
                 graph_token, item_id, sheet_name, f"A{r}:{last_col_letter}{r}", session_id,
                 color="#FFFFFF", bold=True,
             )
-            # 出荷数行は値がA列のみに入っているため、行全体に中央揃えを再適用しておく
-            # （フォント色のPATCHとは別エンドポイントだが、念のため最後にもう一度確定させる）
+            # 出荷数行はA列のみに値が入っているが、Tableは結合セルを含められないため
+            # 実際の結合はせず、複数セルの選択範囲内で中央に見せる
+            # 「選択範囲内で中央」（CenterAcrossSelection）を使う。
             graph_set_range_alignment(
                 graph_token, item_id, sheet_name, f"A{r}:{last_col_letter}{r}", session_id,
-                horizontal="Center", vertical="Center", wrap_text=True,
+                horizontal="CenterAcrossSelection", vertical="Center", wrap_text=True,
             )
 
         graph_batch_set_row_heights(graph_token, item_id, sheet_name, layout["row_heights"], session_id)
