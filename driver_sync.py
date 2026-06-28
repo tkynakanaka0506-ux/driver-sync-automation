@@ -2720,13 +2720,13 @@ def upload_onedrive_excel(graph_token: str, remote_path: str, content: bytes) ->
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         ),
     }
-    max_attempts = 8
+    max_attempts = 12
     for attempt in range(1, max_attempts + 1):
         res = requests.put(url, headers=headers, data=content, timeout=180)
         if res.ok:
             return
         if res.status_code == 423 and attempt < max_attempts:
-            wait_sec = 5 * attempt
+            wait_sec = min(15 * attempt, 60)
             logging.warning(
                 "OneDriveファイルがロック中（%d/%d）。%d秒後に再試行します。"
                 "ブラウザで営業用Excelを開いている場合はタブを閉じてください。",
