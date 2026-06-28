@@ -109,7 +109,7 @@ def extract_ks_rows(workbook: openpyxl.Workbook, today: date) -> list[dict[str, 
         if not an_no and not case_name:
             continue
         product_type = str(ws.cell(row=r, column=KS_PRODUCT_TYPE_COL).value or "").strip()
-        remark2 = f"{product_type} / {KS_CAR_TYPE_LABEL}" if product_type else KS_CAR_TYPE_LABEL
+        remark2 = f"{KS_CAR_TYPE_LABEL} / {product_type}" if product_type else KS_CAR_TYPE_LABEL
         rows.append(
             {
                 "案件No": an_no,
@@ -164,7 +164,7 @@ def extract_parts_rows(workbook: openpyxl.Workbook, today: date) -> list[dict[st
         if not an_no and not case_name:
             continue
         carrier = str(ws.cell(row=r, column=PARTS_CARRIER_COL).value or "").strip()
-        remark2 = f"{carrier} / {PARTS_LABEL}" if carrier else PARTS_LABEL
+        remark2 = f"{PARTS_LABEL} / {carrier}" if carrier else PARTS_LABEL
         rows.append(
             {
                 "案件No": an_no,
