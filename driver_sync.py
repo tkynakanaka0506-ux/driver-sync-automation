@@ -765,8 +765,13 @@ def append_records_from_physical_row(
     arr_days_back: int,
     primary: dict[str, str],
     results: list[dict[str, Any]],
+    require_driver_info: bool = True,
 ) -> None:
-    """1 Excel 行を軸に、指定列から案件情報とドライバー情報をセットで抽出。"""
+    """1 Excel 行を軸に、指定列から案件情報とドライバー情報をセットで抽出。
+
+    require_driver_info=False の場合、ドライバー4項目が未入力（横持ち等で
+    まだ手配が確定していない）の行も除外せず出力する（出荷日サマリー用）。
+    """
     if not has_case_on_row(row_tuple, effective_map):
         return
 
@@ -778,7 +783,7 @@ def append_records_from_physical_row(
     if not arr_date or not is_arr_in_sync_window(arr_date, today, arr_days_back):
         return
 
-    if not leg_complete_at(row_tuple, primary, 0):
+    if require_driver_info and not leg_complete_at(row_tuple, primary, 0):
         logging.warning(
             "ドライバー4項目未入力: %s/%s 行%d 出荷日=%s 案件=%s",
             config_key,
@@ -1088,6 +1093,7 @@ def extract_rows_from_workbook(
     *,
     arr_days_back: int = 7,
     auto_detect_columns: bool = False,
+    require_driver_info: bool = True,
 ) -> list[dict[str, Any]]:
     maps = SHEET_CONFIG.get(config_key, [])
     results: list[dict[str, Any]] = []
@@ -1180,6 +1186,7 @@ def extract_rows_from_workbook(
                 arr_days_back=arr_days_back,
                 primary=primary,
                 results=results,
+                require_driver_info=require_driver_info,
             )
             if len(results) <= before:
                 continue

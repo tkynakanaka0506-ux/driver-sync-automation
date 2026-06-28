@@ -38,6 +38,7 @@ from driver_sync import (
     graph_patch_range_values,
     graph_read_range_values,
     graph_request_with_retry,
+    graph_resize_table,
     graph_resolve_worksheet_name,
     load_config,
     prepare_rows_for_output,
@@ -102,7 +103,11 @@ def md_to_date(md_str: str, today: date) -> date | None:
 
 def collect_all_rows(config: dict[str, Any], today: date) -> list[dict[str, Any]]:
     """4社の元データから抽出する。着日フィルタは出荷日サマリーには使わないため、
-    着日範囲を十分広く取り、出荷日側で別途フィルタする。"""
+    着日範囲を十分広く取り、出荷日側で別途フィルタする。
+
+    require_driver_info=False: 横持ち（中継）案件などドライバー4項目が未確定の行も
+    営業用Excelとは異なり除外しない（出荷日の有無だけが知りたいため）。
+    """
     header_rows = int(config.get("header_rows", 4))
     auto_detect_columns = bool(config.get("auto_detect_columns", False))
 
@@ -120,6 +125,7 @@ def collect_all_rows(config: dict[str, Any], today: date) -> list[dict[str, Any]
             today,
             arr_days_back=400,
             auto_detect_columns=auto_detect_columns,
+            require_driver_info=False,
         )
         workbook.close()
         logging.info("抽出件数: %s = %d", key, len(rows))
@@ -160,6 +166,8 @@ def format_date_label(d: date) -> str:
 MAIN_FONT_NAME = "Meiryo"
 MAIN_FONT_SIZE = 13.0
 MAIN_ROW_HEIGHT = 81.75
+# 見出し行は1行テキストのみなのでデータ行より低くする
+HEADER_ROW_HEIGHT = 24.0
 # 列幅(pt)を実書式から取得（Graph APIのcolumnWidthはptそのまま使える）
 MAIN_COLUMN_WIDTH_PT = {"A": 113.25, "B": 264.0, "C": 74.25, "D": 78.0, "E": 119.25, "F": 355.5, "G": 126.75}
 # Excel組み込みテーブルスタイル「赤、テーブルスタイル（中間）17」の内部名
@@ -183,11 +191,6 @@ def graph_clear_range(
     seg = worksheet_segment(sheet_name)
     url = f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/{seg}/range(address='{address}')/clear"
     graph_request_with_retry("POST", url, graph_token, session_id=session_id, json={"applyTo": apply_to})
-
-
-def graph_delete_table(graph_token: str, item_id: str, table_name: str, session_id: str) -> None:
-    url = f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/tables('{table_name}')"
-    graph_request_with_retry("DELETE", url, graph_token, session_id=session_id)
 
 
 def graph_create_table(
@@ -315,7 +318,7 @@ def build_summary_layout(
         matrix.append([""] * case_max)
 
     matrix.append((header_values[:case_max] + [""] * case_max)[:case_max])
-    row_heights.append((HEADER_ROW, MAIN_ROW_HEIGHT))
+    row_heights.append((HEADER_ROW, HEADER_ROW_HEIGHT))
 
     row_num = HEADER_ROW
     for row in rows:
@@ -346,13 +349,9 @@ def write_summary_via_graph(
     try:
         sheet_name = graph_resolve_worksheet_name(graph_token, item_id, DEFAULT_SHEET_NAME, session_id)
 
-        # テーブルは範囲が変わるごとに削除→再作成する（resizeより確実）
-        for table in graph_list_tables_on_sheet(graph_token, item_id, sheet_name, session_id):
-            graph_delete_table(graph_token, item_id, str(table["name"]), session_id)
-
-        # 前回の結合・書式が残っていると新しい範囲への書き込みでズレるため、まず解除してクリア
+        # 罫線など手動で編集した書式は壊さないよう、値だけクリアする（書式はクリアしない）
         graph_unmerge_range(graph_token, item_id, sheet_name, CLEAR_RANGE, session_id)
-        graph_clear_range(graph_token, item_id, sheet_name, CLEAR_RANGE, session_id, apply_to="All")
+        graph_clear_range(graph_token, item_id, sheet_name, CLEAR_RANGE, session_id, apply_to="Contents")
 
         last_row = layout["last_row"]
         last_col_letter = layout["last_col_letter"]
@@ -373,9 +372,15 @@ def write_summary_via_graph(
 
         graph_batch_set_row_heights(graph_token, item_id, sheet_name, layout["row_heights"], session_id)
 
+        # 既存テーブルがあればリサイズのみ（削除→再作成だと罫線などの手動編集が消える）。
+        # スタイルは初回作成時だけ設定し、以降は触らない。
         table_address = f"A{HEADER_ROW}:{last_col_letter}{last_row}"
-        table_name = graph_create_table(graph_token, item_id, sheet_name, table_address, session_id)
-        graph_set_table_style(graph_token, item_id, table_name, session_id, TABLE_STYLE_NAME)
+        existing_tables = graph_list_tables_on_sheet(graph_token, item_id, sheet_name, session_id)
+        if existing_tables:
+            graph_resize_table(graph_token, item_id, str(existing_tables[0]["name"]), table_address, session_id)
+        else:
+            table_name = graph_create_table(graph_token, item_id, sheet_name, table_address, session_id)
+            graph_set_table_style(graph_token, item_id, table_name, session_id, TABLE_STYLE_NAME)
 
         for col_letter, width_pt in MAIN_COLUMN_WIDTH_PT.items():
             graph_set_column_width(
