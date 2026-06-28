@@ -40,7 +40,10 @@ from driver_sync import (
     graph_read_range_values,
     graph_request_with_retry,
     graph_resolve_worksheet_name,
+    is_highlight_case_name,
+    load_case_name_row_color_map,
     load_config,
+    normalize_case_name_key,
     prepare_rows_for_output,
     release_process_lock,
     rotate_log_if_needed,
@@ -178,6 +181,9 @@ TABLE_STYLE_NAME = "TableStyleMedium17"
 DATE_HEADER_FILL_HEX = "#000000"
 DATE_HEADER_ROW_HEIGHT = 24.0
 SPACER_ROW_HEIGHT = 8.0
+# 横持ち等（driver_sync_config.json の row_colors_by_case_name と同じ案件名）の行は
+# 営業用Excelと同じ色で塗り、それ以外の通常案件と区別する
+DEFAULT_DATA_ROW_FILL_HEX = "#FFFFFF"
 
 
 def graph_range_format_url(item_id: str, sheet_name: str, address: str) -> str:
@@ -328,6 +334,7 @@ def build_summary_layout(
     header_values: list[str],
     today: date,
     window_end: date,
+    color_map: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """営業用Excelと同じA〜G列構成で、出荷日ごとに区切り見出し（黒背景・白文字・結合）を
     挟みつつ書き込む値・行高さ・結合範囲・塗り色・テーブル範囲を組み立てる。
@@ -337,6 +344,7 @@ def build_summary_layout(
     """
     case_max = len(SUMMARY_OUTPUT_COLUMNS)
     last_col_letter = col_letter_from_index(case_max)
+    color_map = color_map or {}
 
     matrix: list[list[Any]] = []
     row_heights: list[tuple[int, float]] = []
@@ -344,6 +352,7 @@ def build_summary_layout(
     date_header_fill_rows: list[int] = []
     date_header_font_rows: list[int] = []
     table_specs: list[tuple[int, int]] = []
+    data_row_fills: list[tuple[int, str]] = []
 
     matrix.append(
         [
@@ -388,6 +397,10 @@ def build_summary_layout(
             row_num += 1
             matrix.append([cell_output_value(row, name) for name in SUMMARY_OUTPUT_COLUMNS])
             row_heights.append((row_num, MAIN_ROW_HEIGHT))
+            case_name = str(row.get("案件名", ""))
+            if is_highlight_case_name(case_name, color_map):
+                fill_hex = color_map[normalize_case_name_key(case_name)]
+                data_row_fills.append((row_num, fill_hex))
 
         table_specs.append((header_row_num, row_num))
 
@@ -400,6 +413,7 @@ def build_summary_layout(
         "date_header_fill_rows": date_header_fill_rows,
         "date_header_font_rows": date_header_font_rows,
         "table_specs": table_specs,
+        "data_row_fills": data_row_fills,
     }
 
 
@@ -452,6 +466,9 @@ def write_summary_via_graph(
         fills = [
             (f"A{r}:{last_col_letter}{r}", DATE_HEADER_FILL_HEX) for r in layout["date_header_fill_rows"]
         ]
+        fills.extend(
+            (f"A{r}:{last_col_letter}{r}", fill_hex) for r, fill_hex in layout["data_row_fills"]
+        )
         graph_batch_patch_fills(graph_token, item_id, sheet_name, fills, session_id)
 
         for r in layout["date_header_font_rows"]:
@@ -526,7 +543,8 @@ def run_summary(dry_run: bool = False, force_login: bool = False) -> int:
             force_login=force_login,
         )
         header_values = fetch_main_header_row(graph_token, config)
-        layout = build_summary_layout(ship_rows, header_values, today, window_end)
+        color_map = load_case_name_row_color_map(config)
+        layout = build_summary_layout(ship_rows, header_values, today, window_end, color_map)
         remote_path = config.get("shipping_summary_path", DEFAULT_OUTPUT_PATH)
         write_summary_via_graph(graph_token, remote_path, layout)
         logging.info("出荷日サマリーを更新しました: %s (%d件)", remote_path, len(ship_rows))
