@@ -421,6 +421,18 @@ def write_summary_via_graph(
             graph_token, item_id, sheet_name, f"A1:{last_col_letter}1", session_id, bold=True,
         )
 
+        # テーブルの作成・リサイズはテーブルスタイル（バンディング）が範囲全体に適用される
+        # ため、出荷数行などの手動の塗り色・文字色より先に行う（後から塗ると上書きされない）。
+        # 既存テーブルがあればリサイズのみ（削除→再作成だと罫線などの手動編集が消える）。
+        # スタイルは初回作成時だけ設定し、以降は触らない。
+        table_address = f"A{HEADER_ROW}:{last_col_letter}{last_row}"
+        existing_tables = graph_list_tables_on_sheet(graph_token, item_id, sheet_name, session_id)
+        if existing_tables:
+            graph_resize_table(graph_token, item_id, str(existing_tables[0]["name"]), table_address, session_id)
+        else:
+            table_name = graph_create_table(graph_token, item_id, sheet_name, table_address, session_id)
+            graph_set_table_style(graph_token, item_id, table_name, session_id, TABLE_STYLE_NAME)
+
         fills = [
             (f"A{r}:{last_col_letter}{r}", DATE_HEADER_FILL_HEX) for r in layout["date_header_fill_rows"]
         ]
@@ -436,16 +448,6 @@ def write_summary_via_graph(
             )
 
         graph_batch_set_row_heights(graph_token, item_id, sheet_name, layout["row_heights"], session_id)
-
-        # 既存テーブルがあればリサイズのみ（削除→再作成だと罫線などの手動編集が消える）。
-        # スタイルは初回作成時だけ設定し、以降は触らない。
-        table_address = f"A{HEADER_ROW}:{last_col_letter}{last_row}"
-        existing_tables = graph_list_tables_on_sheet(graph_token, item_id, sheet_name, session_id)
-        if existing_tables:
-            graph_resize_table(graph_token, item_id, str(existing_tables[0]["name"]), table_address, session_id)
-        else:
-            table_name = graph_create_table(graph_token, item_id, sheet_name, table_address, session_id)
-            graph_set_table_style(graph_token, item_id, table_name, session_id, TABLE_STYLE_NAME)
 
         for col_letter, width_pt in MAIN_COLUMN_WIDTH_PT.items():
             graph_set_column_width(
