@@ -27,6 +27,7 @@ from driver_sync import (
     JST,
     acquire_process_lock,
     acquire_token,
+    cell,
     cell_output_value,
     col_letter_from_index,
     download_share_file,
@@ -126,6 +127,12 @@ def collect_all_rows(config: dict[str, Any], today: date, window_end: date) -> l
         workbook = openpyxl.load_workbook(BytesIO(content), read_only=False, data_only=True)
         # 出荷日サマリーでは滋賀管理シート分は対象外（要望により除外。営業用Excel側は対象のまま）
         excluded_sheet_keywords = ("滋賀", "管理") if key == "nakadori" else ()
+        # 福岡ロジテックのF列(納入先住所)に「御社積み」がある行は、外部倉庫から現場へ
+        # 出庫する分（宇美工場からの出荷ではない）なので出荷日サマリーでは除外する
+        # （要望により出荷日サマリーのみ。営業用Excel側は対象のまま）
+        row_exclude_predicate = (
+            (lambda row_tuple: "御社積み" in cell(row_tuple, "F")) if key == "fukuoka" else None
+        )
         rows = extract_rows_from_workbook(
             workbook,
             key,
@@ -137,6 +144,7 @@ def collect_all_rows(config: dict[str, Any], today: date, window_end: date) -> l
             require_driver_info=False,
             window_date_field="ship",
             excluded_sheet_keywords=excluded_sheet_keywords,
+            row_exclude_predicate=row_exclude_predicate,
         )
         workbook.close()
         logging.info("抽出件数: %s = %d", key, len(rows))
