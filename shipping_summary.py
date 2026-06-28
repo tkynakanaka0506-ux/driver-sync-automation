@@ -30,6 +30,7 @@ from driver_sync import (
     col_letter_from_index,
     download_share_file,
     extract_rows_from_workbook,
+    graph_batch_set_row_heights,
     graph_close_workbook_session,
     graph_create_workbook_session,
     graph_get_drive_item,
