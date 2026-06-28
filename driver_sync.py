@@ -28,7 +28,7 @@ from datetime import date, datetime, time as dt_time, timedelta, timezone
 JST = timezone(timedelta(hours=9))
 from io import BytesIO
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import jpholiday
 import msal
@@ -44,7 +44,7 @@ SHEET_PASSWORD_ENV_VAR = "DRIVER_SYNC_SHEET_PASSWORD"
 PROTECTED_HIDDEN_COLUMN_NAMES = ("携帯番号秘",)  # 非表示+シート保護で隠す列
 MASKED_COLUMN_NAMES = ("携帯番号",)  # 見える列だが値は***でマスクする
 MASK_TEXT = "***"
-MASKED_COLUMN_WIDTH = 100.0  # 携帯番号列の通常表示幅
+MASKED_COLUMN_WIDTH = 130.0  # 携帯番号列の通常表示幅
 PASSWORD_INPUT_CELL = "T1"  # ここにパスワードを入力する
 PASSWORD_INPUT_COLUMN_LETTER = "T"
 PASSWORD_LABEL_CELL = "S1"
@@ -777,6 +777,7 @@ def append_records_from_physical_row(
     require_driver_info: bool = True,
     arr_window_end_override: date | None = None,
     window_date_field: str = "arr",
+    row_exclude_predicate: Callable[[tuple[Any, ...]], bool] | None = None,
 ) -> None:
     """1 Excel 行を軸に、指定列から案件情報とドライバー情報をセットで抽出。
 
@@ -785,7 +786,11 @@ def append_records_from_physical_row(
     window_date_field="ship" にすると、範囲判定を着日でなく出荷日基準にする
     （出荷日サマリー用。"arr"のままなら従来どおり着日基準）。
     arr_window_end_override で上限日を広げられる。
+    row_exclude_predicate(row_tuple) が True を返す行はスキップする（呼び出し元限定の
+    追加除外条件。例: 出荷日サマリーだけ「御社積み」案件を除外する場合に使う）。
     """
+    if row_exclude_predicate is not None and row_exclude_predicate(row_tuple):
+        return
     if not has_case_on_row(row_tuple, effective_map):
         return
 
@@ -1119,6 +1124,7 @@ def extract_rows_from_workbook(
     arr_window_end_override: date | None = None,
     window_date_field: str = "arr",
     excluded_sheet_keywords: tuple[str, ...] = (),
+    row_exclude_predicate: Callable[[tuple[Any, ...]], bool] | None = None,
 ) -> list[dict[str, Any]]:
     maps = SHEET_CONFIG.get(config_key, [])
     results: list[dict[str, Any]] = []
@@ -1216,6 +1222,7 @@ def extract_rows_from_workbook(
                 require_driver_info=require_driver_info,
                 arr_window_end_override=arr_window_end_override,
                 window_date_field=window_date_field,
+                row_exclude_predicate=row_exclude_predicate,
             )
             if len(results) <= before:
                 continue
