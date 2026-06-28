@@ -3300,7 +3300,23 @@ def graph_protect_worksheet(
 ) -> None:
     seg = worksheet_segment(sheet_name)
     url = f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/{seg}/protection/protect"
-    body: dict[str, Any] = {"options": {"allowFormatColumns": False}}
+    # allowFormatColumns だけ False にし、M列（非表示・幅0）の再表示を防ぐ。
+    # それ以外の書式変更（罫線・塗りつぶし・行の高さ等）は通常通り編集できるようにする。
+    body: dict[str, Any] = {
+        "options": {
+            "allowFormatCells": True,
+            "allowFormatColumns": False,
+            "allowFormatRows": True,
+            "allowInsertRows": True,
+            "allowDeleteRows": True,
+            "allowInsertColumns": True,
+            "allowDeleteColumns": True,
+            "allowInsertHyperlinks": True,
+            "allowSort": True,
+            "allowAutoFilter": True,
+            "allowPivotTables": True,
+        }
+    }
     if password:
         body["password"] = password
     res = graph_request_with_retry(
