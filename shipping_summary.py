@@ -294,8 +294,13 @@ def group_rows_by_date(
     return result
 
 
+# F列(型式)・G列(車型)は営業用Excelの見出し文字のままだと意味が伝わらないため、
+# サマリー側だけ表示ラベルを上書きする（列番号=SUMMARY_OUTPUT_COLUMNSのindexで指定、データ自体は変えない）。
+HEADER_LABEL_OVERRIDES = {5: "備考①", 6: "備考②"}
+
+
 def fetch_main_header_row(graph_token: str, config: dict[str, Any]) -> list[str]:
-    """営業用Excelの6行目（A6:G6）の見出しをそのままコピーする。"""
+    """営業用Excelの6行目（A6:G6）の見出しをコピーし、一部ラベルを上書きする。"""
     od = config.get("onedrive_output", {})
     remote_path = od.get("path", "/ドライバー情報/ドライバー情報_営業用.xlsm")
     sheet_name = od.get("sheet_name", "ドライバー情報")
@@ -304,8 +309,13 @@ def fetch_main_header_row(graph_token: str, config: dict[str, Any]) -> list[str]
     address = f"A{HEADER_ROW}:G{HEADER_ROW}"
     values = graph_read_range_values(graph_token, item_id, sheet_name, address, session_id=None)
     if values and values[0]:
-        return [str(v) if v is not None else "" for v in values[0]]
-    return list(SUMMARY_OUTPUT_COLUMNS)
+        header_values = [str(v) if v is not None else "" for v in values[0]]
+    else:
+        header_values = list(SUMMARY_OUTPUT_COLUMNS)
+    for col_index, label in HEADER_LABEL_OVERRIDES.items():
+        if col_index < len(header_values):
+            header_values[col_index] = label
+    return header_values
 
 
 def build_summary_layout(
