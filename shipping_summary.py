@@ -481,6 +481,10 @@ def write_summary_via_graph(
             graph_token, item_id, sheet_name, data_address, session_id,
             horizontal="Center", vertical="Center", wrap_text=True,
         )
+        graph_set_range_alignment(
+            graph_token, item_id, sheet_name, f"A1:{last_col_letter}1", session_id,
+            horizontal="Center", vertical="Center", wrap_text=False,
+        )
         graph_set_range_font(
             graph_token, item_id, sheet_name, data_address, session_id,
             name=MAIN_FONT_NAME, size=MAIN_FONT_SIZE,
