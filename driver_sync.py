@@ -158,6 +158,7 @@ API_DEBUG_PATH = SCRIPT_DIR / "debug_api_last.json"
 CASE_NAME_COLUMN: dict[tuple[str, str], str] = {
     ("matsuzaki", "車両依頼書"): "H",
     ("fukuoka", "車両依頼書"): "G",
+    ("fukuoka", "倉庫管理シート"): "I",
     ("nakadori", "車両依頼書"): "G",
     ("nakadori", "滋賀管理シート"): "K",
     ("nakadori", "滋賀倉庫管理シート"): "K",
@@ -195,7 +196,23 @@ SHEET_CONFIG: dict[str, list[dict[str, Any]]] = {
                 {"company": "Y", "driver": "Z", "plate": "AA", "phone": "AB"},
                 {"company": "AC", "driver": "AD", "plate": "AE", "phone": "AF"},
             ],
-        }
+        },
+        {
+            # 宇美倉庫の横持ち（積替）案件を含む倉庫管理シート。
+            "sheet": "倉庫管理シート",
+            "anNo": "B",
+            "anName": "I",
+            "ship": "E",
+            "arr": "F",
+            "model": "U",
+            "car": ["L", "M", "N"],
+            "arrTime": "G",
+            "carNo": "O",
+            "legs": [
+                {"company": "X", "driver": "Y", "plate": "Z", "phone": "AA"},
+                {"company": "AB", "driver": "AC", "plate": "AD", "phone": "AE"},
+            ],
+        },
     ],
     "nakadori": [
         {
