@@ -183,8 +183,10 @@ TABLE_STYLE_NAME = "TableStyleMedium17"
 # 出荷日ごとの区切り見出し行（黒背景・白文字。テーブル内の通常行として挟む）
 DATE_HEADER_FILL_HEX = "#000000"
 DATE_HEADER_ROW_HEIGHT = 24.0
-# 横持ち等の強調行は営業用Excel側の薄い青ではなく、サマリーでは少し濃めの灰色で区別する
+# 横持ち等の強調行は営業用Excel側の薄い青ではなく、サマリーでは少し濃めの灰色で区別する。
+# それ以外の通常案件は薄い灰色で統一する（テーブルスタイルの交互配色を上書きする）。
 HIGHLIGHT_CASE_FILL_HEX = "#A6A6A6"
+DEFAULT_DATA_ROW_FILL_HEX = "#D9D9D9"
 
 # 法人格表記（株式会社/㈱ など）の有無が案件名表記でブレるため、driver_sync_config.json の
 # row_colors_by_case_name には一致しない場合がある（例:「司企業株式会社　鳥栖営業所」と
@@ -394,6 +396,8 @@ def build_summary_layout(
             case_name = str(row.get("案件名", ""))
             if is_relay_highlight_case_name(case_name, color_map):
                 data_row_fills.append((row_num, HIGHLIGHT_CASE_FILL_HEX))
+            else:
+                data_row_fills.append((row_num, DEFAULT_DATA_ROW_FILL_HEX))
 
     return {
         "matrix": matrix,
