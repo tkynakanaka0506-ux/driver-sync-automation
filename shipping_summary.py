@@ -39,6 +39,7 @@ from driver_sync import (
     graph_patch_range_values,
     graph_read_range_values,
     graph_request_with_retry,
+    graph_resize_table,
     graph_resolve_worksheet_name,
     is_highlight_case_name,
     load_case_name_row_color_map,
@@ -177,13 +178,9 @@ HEADER_ROW_HEIGHT = 24.0
 MAIN_COLUMN_WIDTH_PT = {"A": 113.25, "B": 264.0, "C": 74.25, "D": 78.0, "E": 119.25, "F": 355.5, "G": 126.75}
 # Excel組み込みテーブルスタイル「赤、テーブルスタイル（中間）17」の内部名
 TABLE_STYLE_NAME = "TableStyleMedium17"
-# 出荷日ごとの区切り見出し行（黒背景・白文字・結合セル）
+# 出荷日ごとの区切り見出し行（黒背景・白文字。テーブル内の通常行として挟む）
 DATE_HEADER_FILL_HEX = "#000000"
 DATE_HEADER_ROW_HEIGHT = 24.0
-SPACER_ROW_HEIGHT = 8.0
-# 横持ち等（driver_sync_config.json の row_colors_by_case_name と同じ案件名）の行は
-# 営業用Excelと同じ色で塗り、それ以外の通常案件と区別する
-DEFAULT_DATA_ROW_FILL_HEX = "#FFFFFF"
 
 
 def graph_range_format_url(item_id: str, sheet_name: str, address: str) -> str:
@@ -195,19 +192,6 @@ def graph_unmerge_range(graph_token: str, item_id: str, sheet_name: str, address
     seg = worksheet_segment(sheet_name)
     url = f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/{seg}/range(address='{address}')/unmerge"
     graph_request_with_retry("POST", url, graph_token, session_id=session_id)
-
-
-def graph_merge_range(graph_token: str, item_id: str, sheet_name: str, address: str, session_id: str) -> None:
-    seg = worksheet_segment(sheet_name)
-    url = f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/{seg}/range(address='{address}')/merge"
-    graph_request_with_retry("POST", url, graph_token, session_id=session_id, json={"across": False})
-
-
-def graph_delete_table(graph_token: str, item_id: str, table_name: str, session_id: str) -> None:
-    url = f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/tables('{table_name}')"
-    res = graph_request_with_retry("DELETE", url, graph_token, session_id=session_id)
-    if not res.ok and res.status_code != 404:
-        raise RuntimeError(f"テーブル削除失敗: {res.status_code} {res.text[:300]}")
 
 
 def graph_clear_range(
@@ -336,11 +320,12 @@ def build_summary_layout(
     window_end: date,
     color_map: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """営業用Excelと同じA〜G列構成で、出荷日ごとに区切り見出し（黒背景・白文字・結合）を
-    挟みつつ書き込む値・行高さ・結合範囲・塗り色・テーブル範囲を組み立てる。
+    """営業用Excelと同じA〜G列構成で、出荷日ごとの「出荷数：N件」行をテーブル内の
+    通常行として挟みつつ書き込む値・行高さ・塗り色を組み立てる。
 
-    各出荷日グループは1つの独立したExcelテーブル（テーブルスタイル中間17）として扱う。
-    Tableは結合セルを含められないため、区切り見出し行・空白行はテーブル範囲の外に置く。
+    Tableは結合セルを含められないため結合はしない（A列のみに文言を入れ、他列は空）。
+    見出し行は1つだけ（テーブル全体で1つのExcelテーブルとして扱う＝既存テーブルは
+    削除せずリサイズのみで、罫線などの手動書式を保持する）。
     """
     case_max = len(SUMMARY_OUTPUT_COLUMNS)
     last_col_letter = col_letter_from_index(case_max)
@@ -348,10 +333,8 @@ def build_summary_layout(
 
     matrix: list[list[Any]] = []
     row_heights: list[tuple[int, float]] = []
-    merge_addresses: list[str] = []
     date_header_fill_rows: list[int] = []
     date_header_font_rows: list[int] = []
-    table_specs: list[tuple[int, int]] = []
     data_row_fills: list[tuple[int, str]] = []
 
     matrix.append(
@@ -367,31 +350,19 @@ def build_summary_layout(
     for _ in range(2, HEADER_ROW):
         matrix.append([""] * case_max)
 
-    row_num = HEADER_ROW - 1
+    matrix.append((header_values[:case_max] + [""] * case_max)[:case_max])
+    row_heights.append((HEADER_ROW, HEADER_ROW_HEIGHT))
+
+    row_num = HEADER_ROW
     groups = group_rows_by_date(rows, today, window_end)
     for d, day_rows in groups:
-        # 空白の区切り行
-        row_num += 1
-        matrix.append([""] * case_max)
-        row_heights.append((row_num, SPACER_ROW_HEIGHT))
-
-        # 結合・黒背景白文字の日付見出し行
+        # 黒背景白文字の出荷数行（テーブル内の通常行として挟む。結合はしない）
         row_num += 1
         date_header_row = row_num
         matrix.append([f"{format_date_label(d)} 出荷数：{len(day_rows)}件"] + [""] * (case_max - 1))
         row_heights.append((date_header_row, DATE_HEADER_ROW_HEIGHT))
-        merge_addresses.append(f"A{date_header_row}:{last_col_letter}{date_header_row}")
         date_header_fill_rows.append(date_header_row)
         date_header_font_rows.append(date_header_row)
-
-        if not day_rows:
-            continue
-
-        # 列見出し行
-        row_num += 1
-        header_row_num = row_num
-        matrix.append((header_values[:case_max] + [""] * case_max)[:case_max])
-        row_heights.append((header_row_num, HEADER_ROW_HEIGHT))
 
         for row in day_rows:
             row_num += 1
@@ -402,17 +373,13 @@ def build_summary_layout(
                 fill_hex = color_map[normalize_case_name_key(case_name)]
                 data_row_fills.append((row_num, fill_hex))
 
-        table_specs.append((header_row_num, row_num))
-
     return {
         "matrix": matrix,
         "row_heights": row_heights,
         "last_row": row_num,
         "last_col_letter": last_col_letter,
-        "merge_addresses": merge_addresses,
         "date_header_fill_rows": date_header_fill_rows,
         "date_header_font_rows": date_header_font_rows,
-        "table_specs": table_specs,
         "data_row_fills": data_row_fills,
     }
 
@@ -440,12 +407,6 @@ def write_summary_via_graph(
         last_col_letter = layout["last_col_letter"]
         data_address = f"A1:{last_col_letter}{last_row}"
 
-        # 出荷日ごとのテーブルは行数が変わるたびに範囲が変わるため、毎回削除して作り直す
-        # （= このテーブルに手動で設定した罫線・書式は実行ごとにリセットされる点に注意）。
-        existing_tables = graph_list_tables_on_sheet(graph_token, item_id, sheet_name, session_id)
-        for tbl in existing_tables:
-            graph_delete_table(graph_token, item_id, str(tbl["name"]), session_id)
-
         graph_patch_range_values(graph_token, item_id, sheet_name, data_address, layout["matrix"], session_id)
 
         graph_set_range_alignment(
@@ -459,9 +420,6 @@ def write_summary_via_graph(
         graph_set_range_font(
             graph_token, item_id, sheet_name, f"A1:{last_col_letter}1", session_id, bold=True,
         )
-
-        for address in layout["merge_addresses"]:
-            graph_merge_range(graph_token, item_id, sheet_name, address, session_id)
 
         fills = [
             (f"A{r}:{last_col_letter}{r}", DATE_HEADER_FILL_HEX) for r in layout["date_header_fill_rows"]
@@ -479,8 +437,13 @@ def write_summary_via_graph(
 
         graph_batch_set_row_heights(graph_token, item_id, sheet_name, layout["row_heights"], session_id)
 
-        for header_row_num, group_last_row in layout["table_specs"]:
-            table_address = f"A{header_row_num}:{last_col_letter}{group_last_row}"
+        # 既存テーブルがあればリサイズのみ（削除→再作成だと罫線などの手動編集が消える）。
+        # スタイルは初回作成時だけ設定し、以降は触らない。
+        table_address = f"A{HEADER_ROW}:{last_col_letter}{last_row}"
+        existing_tables = graph_list_tables_on_sheet(graph_token, item_id, sheet_name, session_id)
+        if existing_tables:
+            graph_resize_table(graph_token, item_id, str(existing_tables[0]["name"]), table_address, session_id)
+        else:
             table_name = graph_create_table(graph_token, item_id, sheet_name, table_address, session_id)
             graph_set_table_style(graph_token, item_id, table_name, session_id, TABLE_STYLE_NAME)
 
