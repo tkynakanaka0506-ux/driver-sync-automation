@@ -109,6 +109,7 @@ def extract_ks_rows(workbook: openpyxl.Workbook, today: date) -> list[dict[str, 
         if not an_no and not case_name:
             continue
         product_type = str(ws.cell(row=r, column=KS_PRODUCT_TYPE_COL).value or "").strip()
+        remark2 = f"{product_type} / {KS_CAR_TYPE_LABEL}" if product_type else KS_CAR_TYPE_LABEL
         rows.append(
             {
                 "案件No": an_no,
@@ -116,8 +117,8 @@ def extract_ks_rows(workbook: openpyxl.Workbook, today: date) -> list[dict[str, 
                 "出荷日": to_md(ws.cell(row=r, column=KS_SHIP_COL).value, today),
                 "着日": to_md(ws.cell(row=r, column=KS_ARR_COL).value, today),
                 "備考": "",
-                "型式": product_type,
-                "車型": KS_CAR_TYPE_LABEL,
+                "型式": remark2,
+                "車型": "",
                 "依頼先": KS_SOURCE_KEY,
                 "行キー": f"{KS_SOURCE_KEY}|{KS_SHEET_NAME}|{r}",
             }
@@ -144,6 +145,7 @@ PARTS_ARR_COL = 4
 PARTS_CASE_NAME_COL = 7
 PARTS_CARRIER_COL = 13
 PARTS_ACCEPT_STATUS = "配車確定"
+PARTS_LABEL = "パーツ"
 
 
 def extract_parts_rows(workbook: openpyxl.Workbook, today: date) -> list[dict[str, Any]]:
@@ -162,6 +164,7 @@ def extract_parts_rows(workbook: openpyxl.Workbook, today: date) -> list[dict[st
         if not an_no and not case_name:
             continue
         carrier = str(ws.cell(row=r, column=PARTS_CARRIER_COL).value or "").strip()
+        remark2 = f"{carrier} / {PARTS_LABEL}" if carrier else PARTS_LABEL
         rows.append(
             {
                 "案件No": an_no,
@@ -169,8 +172,8 @@ def extract_parts_rows(workbook: openpyxl.Workbook, today: date) -> list[dict[st
                 "出荷日": to_md(ws.cell(row=r, column=PARTS_SHIP_COL).value, today),
                 "着日": to_md(ws.cell(row=r, column=PARTS_ARR_COL).value, today),
                 "備考": "",
-                "型式": "",
-                "車型": carrier,
+                "型式": remark2,
+                "車型": "",
                 "依頼先": PARTS_SOURCE_KEY,
                 "行キー": f"{PARTS_SOURCE_KEY}|{PARTS_SHEET_NAME}|{r}",
             }
