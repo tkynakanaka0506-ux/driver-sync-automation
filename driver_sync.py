@@ -45,11 +45,13 @@ PROTECTED_HIDDEN_COLUMN_NAMES = ("携帯番号秘",)  # 非表示+シート保�
 MASKED_COLUMN_NAMES = ("携帯番号",)  # 見える列だが値は***でマスクする
 MASK_TEXT = "***"
 MASKED_COLUMN_WIDTH = 100.0  # 携帯番号列の通常表示幅
-PASSWORD_INPUT_CELL = "P1"  # ここにパスワードを入力すると携帯番号列が一時的に見える
-PASSWORD_INPUT_COLUMN_LETTER = "P"
-PASSWORD_LABEL_CELL = "O1"
+PASSWORD_INPUT_CELL = "T1"  # ここにパスワードを入力する
+PASSWORD_INPUT_COLUMN_LETTER = "T"
+PASSWORD_LABEL_CELL = "S1"
 PASSWORD_STORAGE_CELL = "O2"  # 合言葉の正解を保存（K/L列1行目はG1:L1のマージセルで書込不可だったため別セルに変更）
 PASSWORD_STORAGE_CELL_ABS = "$O$2"
+TARGET_CASE_INPUT_CELL = "U1"  # ここに案件Noを入力すると、その行だけ携帯番号が見える
+TARGET_CASE_INPUT_CELL_ABS = "$U$1"
 LOG_PATH = SCRIPT_DIR / "driver_sync.log"
 TASK_LOG_PATH = SCRIPT_DIR / "driver_sync_task.log"
 STATUS_PATH = SCRIPT_DIR / "driver_sync_status.json"
@@ -1756,6 +1758,7 @@ def cell_output_value(
     col_name: str,
     hidden_col_letter: str | None = None,
     excel_row: int | None = None,
+    case_col_letter: str | None = None,
 ) -> Any:
     value = row.get(col_name, "")
     if value is None:
@@ -1765,10 +1768,12 @@ def cell_output_value(
     if col_name in MASKED_COLUMN_NAMES:
         if not str(value).strip():
             return ""
-        if hidden_col_letter and excel_row:
-            # パスワード入力欄が合言葉セルと一致した時だけ本物を表示。
+        if hidden_col_letter and excel_row and case_col_letter:
+            # パスワードが合っていて、かつ確認したい案件No欄がこの行の案件Noと
+            # 一致した時だけ、その行の本物の番号を表示する（他の行は***のまま）。
             return (
-                f"=IF(${PASSWORD_INPUT_COLUMN_LETTER}$1={PASSWORD_STORAGE_CELL_ABS},"
+                f"=IF(AND(${PASSWORD_INPUT_COLUMN_LETTER}$1={PASSWORD_STORAGE_CELL_ABS},"
+                f"{TARGET_CASE_INPUT_CELL_ABS}={case_col_letter}{excel_row}),"
                 f"{hidden_col_letter}{excel_row},\"{MASK_TEXT}\")"
             )
         return MASK_TEXT
@@ -2302,13 +2307,15 @@ def build_range_values(
     hidden_col_letter = (
         col_letter_from_index(hidden_col_idx) if hidden_col_idx else None
     )
+    case_col_idx = col_map.get("案件No")
+    case_col_letter = col_letter_from_index(case_col_idx) if case_col_idx else None
     matrix: list[list[Any]] = []
     for offset, row in enumerate(rows):
         excel_row = data_start_row + offset
         line = [""] * width
         for name, col_idx in col_map.items():
             line[col_idx - min_col] = cell_output_value(
-                row, name, hidden_col_letter, excel_row
+                row, name, hidden_col_letter, excel_row, case_col_letter
             )
         matrix.append(line)
     return matrix, min_col, max_col
@@ -2757,6 +2764,10 @@ def update_onedrive_values_only(
             graph_patch_range_values(
                 graph_token, item_id, ws_name,
                 PASSWORD_LABEL_CELL, [["携帯番号PW→"]], session_id,
+            )
+            graph_patch_range_values(
+                graph_token, item_id, ws_name,
+                "R1", [["案件No→"]], session_id,
             )
             graph_set_column_width(
                 graph_token, item_id, ws_name, "O", 0, session_id,
