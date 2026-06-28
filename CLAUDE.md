@@ -52,6 +52,12 @@ cron-job.org (15分ごとHTTP POST)
   というExcel自体の制限があり、`.xlsx`→`.xlsm`変換は新しいOneDriveアイテムとして作られるため、
   既存の匿名共有リンクは無効になり新しいリンクが発行される（復元不可・仕様上の制限）。
   ファイル形式を変える作業は、リンクの再共有が必要になることを前提に進めること。
+- **このローカルフォルダ（`C:\Users\1229\Desktop\driver-sync-repo`）とOneDrive上の
+  `ドライバー情報_営業用.xlsm`を、別のAIセッション/エージェントが同時に操作していることがある**。
+  pushしたつもりの内容が数分後に他コミットで上書きされていたり、`driver_sync.py`が
+  同時に2プロセス実行されてOneDriveのロック競合が起きることがある。コミット・push前には必ず
+  `git fetch origin main`で最新コミットを確認し、ファイル全体のコピー上書きではなく該当箇所だけの
+  編集で反映すること。
 
 ## 携帯番号の保護（マスク表示＋VBAボタン）
 
@@ -62,13 +68,20 @@ cron-job.org (15分ごとHTTP POST)
 - シートはパスワード保護（`options.allowFormatColumns: false`等）。パスワードは
   環境変数`DRIVER_SYNC_SHEET_PASWORD`→ローカルファイル`sheet_password.txt`（Git管理外）の順で読む。
   GitHub Actionsでは`SHEET_PASSWORD`シークレットを`DRIVER_SYNC_SHEET_PASSWORD`として渡している。
-- `driver_sync.py`は毎回 unprotect → 書き込み → M列非表示+K列幅復元 → reprotect を繰り返す
-  （`graph_unprotect_worksheet` / `graph_protect_worksheet` / `graph_set_column_width`）。
-- シート上に「携帯番号を表示」ボタン（VBA `ShowMobileNumbers`マクロ）があり、パスワードを
-  入力するとM列を一時的に再表示できる。次回の自動同期（15分以内）で自動的に再び非表示に戻る。
-- VBAプロジェクトの追加はGraph APIでは不可なため、ローカルでExcel COM自動化
+- **保護範囲はK列・M列のみ**（`apply_phone_column_protection_scope` / `graph_set_range_locked`）。
+  保護をかける直前に毎回 A1:Z2000 のロックを解除→K列・M列だけ再ロックしてから`protect`するため、
+  他の列（案件No、出荷日、備考など）はシート保護中でも自由に編集できる。
+- `driver_sync.py`は毎回 unprotect → 書き込み → M列非表示+K列幅復元 → 保護範囲をK/M列に絞る → reprotect
+  を繰り返す（`graph_unprotect_worksheet` / `apply_phone_column_protection_scope` /
+  `graph_protect_worksheet` / `graph_set_column_width`）。
+- シート上に「携帯番号を表示（選択した行だけ）」ボタン（VBA `ShowPhoneForActiveRow`マクロ）があり、
+  選択中の行のセルでパスワードを入力すると、その行だけの携帯番号がメッセージボックスで表示される
+  （M列自体は再表示されず、他の行の番号も見えない）。
+- VBAプロジェクトの追加・変更はGraph APIでは不可なため、ローカルでExcel COM自動化
   （`win32com.client`、要: Excelの「VBAプロジェクトオブジェクトモデルへのアクセスを信頼する」設定）
-  を使って一度だけ手動で組み込んだ。再度VBAを変更する場合も同じ手順が必要。
+  を使って手動で組み込む。OneDrive同期フォルダ内のファイルを直接`Workbooks.Open`しようとすると
+  アクセス拒否エラーになることがあるため、ローカルにコピー→COM操作→OneDriveへコピーし直す手順が安全
+  （`update_vba_button.py`参照）。
 
 ## 関連シークレット（このリポジトリのGitHub Secrets）
 
