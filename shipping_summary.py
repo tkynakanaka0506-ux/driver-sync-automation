@@ -125,6 +125,59 @@ def extract_ks_rows(workbook: openpyxl.Workbook, today: date) -> list[dict[str, 
     return rows
 
 
+# パーツ➔発送（出荷日サマリー専用の追加抽出元、KSサポートと同じ構造）。
+# A〜G列はKSサポートと同じ。M列(運送業者)を車型に反映する。
+PARTS_SOURCE_SHARE_URL = (
+    "https://onedrive.live.com/:x:/g/personal/1331A7580E0E4466/"
+    "IQBOFWrnEII9R4qy9nCbksTDAbGkrg8q69j8umLQjpZyNMU"
+    "?resid=1331A7580E0E4466!se76a154e8210473d8ab2f6709b92c4c3&ithint=file%2Cxlsx&e=4%3Ald9U5q"
+    "&sharingv2=true&fromShare=true&at=9&migratedtospo=true"
+    "&redeem=aHR0cHM6Ly8xZHJ2Lm1zL3gvYy8xMzMxQTc1ODBFMEU0NDY2L0lRQk9GV3JuRUlJOVI0cXk5bkNia3NUREFiR2tyZzhxNjlqOHVtTFFqcFp5Tk1VP2U9NDpsZDlVNXEmc2hhcmluZ3YyPXRydWUmZnJvbVNoYXJlPXRydWUmYXQ9OQ"
+)
+PARTS_SOURCE_KEY = "parts"
+PARTS_SHEET_NAME = "車両依頼書"
+PARTS_HEADER_ROWS = 4
+PARTS_STATUS_COL = 1
+PARTS_AN_NO_COL = 2
+PARTS_SHIP_COL = 3
+PARTS_ARR_COL = 4
+PARTS_CASE_NAME_COL = 7
+PARTS_CARRIER_COL = 13
+PARTS_ACCEPT_STATUS = "配車確定"
+
+
+def extract_parts_rows(workbook: openpyxl.Workbook, today: date) -> list[dict[str, Any]]:
+    """パーツ➔発送の依頼書から、ステータスが「配車確定」の行だけを抽出する。
+
+    M列(運送業者)を車型に反映する（KSサポートと違い固定値ではなく実際の業者名）。
+    """
+    ws = workbook[PARTS_SHEET_NAME]
+    rows: list[dict[str, Any]] = []
+    for r in range(PARTS_HEADER_ROWS + 1, ws.max_row + 1):
+        status = str(ws.cell(row=r, column=PARTS_STATUS_COL).value or "").strip()
+        if status != PARTS_ACCEPT_STATUS:
+            continue
+        an_no = str(ws.cell(row=r, column=PARTS_AN_NO_COL).value or "").strip()
+        case_name = str(ws.cell(row=r, column=PARTS_CASE_NAME_COL).value or "").strip()
+        if not an_no and not case_name:
+            continue
+        carrier = str(ws.cell(row=r, column=PARTS_CARRIER_COL).value or "").strip()
+        rows.append(
+            {
+                "案件No": an_no,
+                "案件名": case_name,
+                "出荷日": to_md(ws.cell(row=r, column=PARTS_SHIP_COL).value, today),
+                "着日": to_md(ws.cell(row=r, column=PARTS_ARR_COL).value, today),
+                "備考": "",
+                "型式": "",
+                "車型": carrier,
+                "依頼先": PARTS_SOURCE_KEY,
+                "行キー": f"{PARTS_SOURCE_KEY}|{PARTS_SHEET_NAME}|{r}",
+            }
+        )
+    return rows
+
+
 def ship_window_end(today: date, days_ahead: int = DEFAULT_DAYS_AHEAD) -> date:
     """出荷日表示範囲の終端日を求める。
 
@@ -211,6 +264,17 @@ def collect_all_rows(config: dict[str, Any], today: date, window_end: date) -> l
     ks_workbook.close()
     logging.info("抽出件数: %s = %d", KS_SOURCE_KEY, len(ks_rows))
     all_rows.extend(ks_rows)
+
+    logging.info("取得中: %s", PARTS_SOURCE_KEY)
+    parts_content = download_share_file(PARTS_SOURCE_SHARE_URL)
+    parts_workbook = openpyxl.load_workbook(BytesIO(parts_content), read_only=False, data_only=True)
+    parts_rows = extract_parts_rows(parts_workbook, today)
+    parts_workbook.close()
+    # KSサポートと案件No(案件No)が重複する分は二重表示を避けるため除外する（要望により）
+    ks_an_nos = {str(r.get("案件No", "")) for r in ks_rows if r.get("案件No")}
+    parts_rows = [r for r in parts_rows if str(r.get("案件No", "")) not in ks_an_nos]
+    logging.info("抽出件数: %s = %d", PARTS_SOURCE_KEY, len(parts_rows))
+    all_rows.extend(parts_rows)
 
     return prepare_rows_for_output(all_rows, today)
 
@@ -488,7 +552,7 @@ def build_summary_layout(
             matrix.append([cell_output_value(row, name) for name in SUMMARY_OUTPUT_COLUMNS])
             row_heights.append((row_num, MAIN_ROW_HEIGHT))
             case_name = str(row.get("案件名", ""))
-            if row.get("依頼先") == KS_SOURCE_KEY:
+            if row.get("依頼先") in (KS_SOURCE_KEY, PARTS_SOURCE_KEY):
                 data_row_fills.append((row_num, KS_ROW_FILL_HEX))
             elif is_relay_highlight_case_name(case_name, color_map):
                 data_row_fills.append((row_num, HIGHLIGHT_CASE_FILL_HEX))
