@@ -275,6 +275,24 @@ def graph_set_range_font(
     graph_request_with_retry("PATCH", url, graph_token, session_id=session_id, json=font_props)
 
 
+BORDER_EDGES = ("EdgeTop", "EdgeBottom", "EdgeLeft", "EdgeRight", "InsideVertical", "InsideHorizontal")
+
+
+def graph_set_range_border_color(
+    graph_token: str, item_id: str, sheet_name: str, address: str, session_id: str, color_hex: str
+) -> None:
+    seg = worksheet_segment(sheet_name)
+    for edge in BORDER_EDGES:
+        url = (
+            f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/{seg}/"
+            f"range(address='{address}')/format/borders('{edge}')"
+        )
+        graph_request_with_retry(
+            "PATCH", url, graph_token, session_id=session_id,
+            json={"color": color_hex, "style": "Continuous"},
+        )
+
+
 def graph_set_column_width(
     graph_token: str, item_id: str, sheet_name: str, address: str, session_id: str, width_pt: float
 ) -> None:
@@ -489,6 +507,9 @@ def write_summary_via_graph(
             graph_set_range_alignment(
                 graph_token, item_id, sheet_name, f"A{r}:{last_col_letter}{r}", session_id,
                 horizontal="CenterAcrossSelection", vertical="Center", wrap_text=False,
+            )
+            graph_set_range_border_color(
+                graph_token, item_id, sheet_name, f"A{r}:{last_col_letter}{r}", session_id, "#FFFFFF",
             )
 
         graph_batch_set_row_heights(graph_token, item_id, sheet_name, layout["row_heights"], session_id)
