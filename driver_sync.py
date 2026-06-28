@@ -2702,11 +2702,15 @@ def update_onedrive_values_only(
                         graph_token, item_id, ws_name,
                         col_letter_from_index(hidden_col), 0, session_id,
                     )
+            apply_phone_column_protection_scope(
+                graph_token, item_id, ws_name, col_map, session_id
+            )
             graph_protect_worksheet(
                 graph_token, item_id, ws_name, session_id, sheet_password
             )
             logging.info(
-                "シート保護を再適用（非表示列: %s）",
+                "シート保護を再適用（保護対象は携帯番号列のみ: %s / 非表示列: %s）",
+                ", ".join(MASKED_COLUMN_NAMES),
                 ", ".join(PROTECTED_HIDDEN_COLUMN_NAMES),
             )
 
@@ -3207,6 +3211,48 @@ def graph_set_column_width(
         "PATCH", url, graph_token, session_id=session_id,
         json={"columnWidth": width},
     )
+
+
+def graph_set_range_locked(
+    graph_token: str,
+    item_id: str,
+    sheet_name: str,
+    range_address: str,
+    locked: bool,
+    session_id: str,
+) -> None:
+    seg = worksheet_segment(sheet_name)
+    url = (
+        f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/"
+        f"{seg}/range(address='{range_address}')/format/protection"
+    )
+    graph_request_with_retry(
+        "PATCH", url, graph_token, session_id=session_id,
+        json={"locked": locked},
+    )
+
+
+PROTECTION_UNLOCK_RANGE = "A1:Z2000"
+
+
+def apply_phone_column_protection_scope(
+    graph_token: str,
+    item_id: str,
+    sheet_name: str,
+    col_map: dict[str, int],
+    session_id: str,
+) -> None:
+    """シート保護が携帯番号関連列だけにかかるよう、他のセルのロックを解除する。"""
+    graph_set_range_locked(
+        graph_token, item_id, sheet_name, PROTECTION_UNLOCK_RANGE, False, session_id
+    )
+    for locked_col_name in (*MASKED_COLUMN_NAMES, *PROTECTED_HIDDEN_COLUMN_NAMES):
+        col_idx = col_map.get(locked_col_name)
+        if col_idx:
+            letter = col_letter_from_index(col_idx)
+            graph_set_range_locked(
+                graph_token, item_id, sheet_name, f"{letter}:{letter}", True, session_id
+            )
 
 
 def graph_unprotect_worksheet(
