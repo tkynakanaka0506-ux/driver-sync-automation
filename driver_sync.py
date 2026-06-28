@@ -1118,12 +1118,15 @@ def extract_rows_from_workbook(
     require_driver_info: bool = True,
     arr_window_end_override: date | None = None,
     window_date_field: str = "arr",
+    excluded_sheet_keywords: tuple[str, ...] = (),
 ) -> list[dict[str, Any]]:
     maps = SHEET_CONFIG.get(config_key, [])
     results: list[dict[str, Any]] = []
 
     for sheet_map in maps:
         sheet_name = sheet_map["sheet"]
+        if excluded_sheet_keywords and all(kw in sheet_name for kw in excluded_sheet_keywords):
+            continue
         # シート名の前後空白ゆれを無視して照合（例: "滋賀管理シート "）
         actual_name = next(
             (s for s in workbook.sheetnames if s.strip() == sheet_name.strip()),

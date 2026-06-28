@@ -124,6 +124,8 @@ def collect_all_rows(config: dict[str, Any], today: date, window_end: date) -> l
         logging.info("取得中: %s", key)
         content = download_share_file(share_url)
         workbook = openpyxl.load_workbook(BytesIO(content), read_only=False, data_only=True)
+        # 出荷日サマリーでは滋賀管理シート分は対象外（要望により除外。営業用Excel側は対象のまま）
+        excluded_sheet_keywords = ("滋賀", "管理") if key == "nakadori" else ()
         rows = extract_rows_from_workbook(
             workbook,
             key,
@@ -134,6 +136,7 @@ def collect_all_rows(config: dict[str, Any], today: date, window_end: date) -> l
             arr_window_end_override=window_end,
             require_driver_info=False,
             window_date_field="ship",
+            excluded_sheet_keywords=excluded_sheet_keywords,
         )
         workbook.close()
         logging.info("抽出件数: %s = %d", key, len(rows))
