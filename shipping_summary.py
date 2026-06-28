@@ -30,18 +30,15 @@ from driver_sync import (
     col_letter_from_index,
     download_share_file,
     extract_rows_from_workbook,
-    graph_batch_patch_fills,
-    graph_batch_set_row_heights,
     graph_close_workbook_session,
     graph_create_workbook_session,
     graph_get_drive_item,
+    graph_list_tables_on_sheet,
     graph_patch_range_values,
     graph_read_range_values,
     graph_request_with_retry,
     graph_resolve_worksheet_name,
-    load_case_name_row_color_map,
     load_config,
-    normalize_case_name_key,
     prepare_rows_for_output,
     release_process_lock,
     rotate_log_if_needed,
@@ -157,34 +154,15 @@ def format_date_label(d: date) -> str:
 
 
 # 営業用Excel データ行(7行目)の実書式をGraph APIで調査した結果（2026-06-27確認）。
-# 全列とも 中央揃え(横・縦)・折り返し表示・Meiryo 13pt・行高さ81.75pt で統一されている。
+# フォント・行高さは引き続き合わせる。色はExcelテーブル機能（バンド）に一本化したため、
+# 案件名別の手動色分け（横持ち等）は廃止。
 MAIN_FONT_NAME = "Meiryo"
 MAIN_FONT_SIZE = 13.0
 MAIN_ROW_HEIGHT = 81.75
 # 列幅(pt)を実書式から取得（Graph APIのcolumnWidthはptそのまま使える）
 MAIN_COLUMN_WIDTH_PT = {"A": 113.25, "B": 264.0, "C": 74.25, "D": 78.0, "E": 119.25, "F": 355.5, "G": 126.75}
-# 案件情報の塗り色は若干グレーで統一（営業用Excelの案件名別ハイライトは使わない）
-CASE_INFO_FILL_HEX = "#EDEDED"
-# 横持ち（案件名に「横持」を含む案件）と、営業用Excelで強調指定されている案件名
-# （driver_sync_config.json の row_colors_by_case_name、ユーザー編集済みなので
-# キー自体は変更しない）は少し濃いグレーで区別する
-YOKOMOCHI_FILL_HEX = "#BFBFBF"
-YOKOMOCHI_KEYWORD = "横持"
-
-
-def is_darkened_case(case_name: str, highlight_keys: set[str]) -> bool:
-    if YOKOMOCHI_KEYWORD in case_name:
-        return True
-    return normalize_case_name_key(case_name) in highlight_keys
-
-
-# 出荷日ごとの区切り見出し行（黒背景・白文字）
-DATE_HEADER_FILL_HEX = "#000000"
-DATE_HEADER_ROW_HEIGHT = 24
-SPACER_ROW_HEIGHT = 8
-# 表全体に罫線を引く（薄いグレー）
-BORDER_COLOR_HEX = "#BFBFBF"
-BORDER_SIDES = ("EdgeTop", "EdgeBottom", "EdgeLeft", "EdgeRight", "InsideHorizontal", "InsideVertical")
+# Excel組み込みテーブルスタイル「赤、テーブルスタイル（中間）17」の内部名
+TABLE_STYLE_NAME = "TableStyleMedium17"
 
 
 def graph_range_format_url(item_id: str, sheet_name: str, address: str) -> str:
@@ -206,10 +184,29 @@ def graph_clear_range(
     graph_request_with_retry("POST", url, graph_token, session_id=session_id, json={"applyTo": apply_to})
 
 
-def graph_merge_range(graph_token: str, item_id: str, sheet_name: str, address: str, session_id: str) -> None:
+def graph_delete_table(graph_token: str, item_id: str, table_name: str, session_id: str) -> None:
+    url = f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/tables('{table_name}')"
+    graph_request_with_retry("DELETE", url, graph_token, session_id=session_id)
+
+
+def graph_create_table(
+    graph_token: str, item_id: str, sheet_name: str, address: str, session_id: str, *, has_headers: bool = True
+) -> str:
     seg = worksheet_segment(sheet_name)
-    url = f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/{seg}/range(address='{address}')/merge"
-    graph_request_with_retry("POST", url, graph_token, session_id=session_id, json={"across": False})
+    url = f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/{seg}/tables/add"
+    res = graph_request_with_retry(
+        "POST", url, graph_token, session_id=session_id, json={"address": address, "hasHeaders": has_headers}
+    )
+    if not res.ok:
+        raise RuntimeError(f"テーブル作成失敗: {res.status_code} {res.text[:300]}")
+    return str(res.json()["name"])
+
+
+def graph_set_table_style(graph_token: str, item_id: str, table_name: str, session_id: str, style_name: str) -> None:
+    url = f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/tables('{table_name}')"
+    res = graph_request_with_retry("PATCH", url, graph_token, session_id=session_id, json={"style": style_name})
+    if not res.ok:
+        raise RuntimeError(f"テーブルスタイル設定失敗: {res.status_code} {res.text[:300]}")
 
 
 def graph_set_range_alignment(
@@ -240,21 +237,6 @@ def graph_set_range_font(
     graph_request_with_retry("PATCH", url, graph_token, session_id=session_id, json=font_props)
 
 
-def graph_set_range_borders(
-    graph_token: str, item_id: str, sheet_name: str, address: str, session_id: str, color_hex: str
-) -> None:
-    fmt_url = graph_range_format_url(item_id, sheet_name, address)
-    for side in BORDER_SIDES:
-        url = f"{fmt_url}/borders('{side}')"
-        graph_request_with_retry(
-            "PATCH",
-            url,
-            graph_token,
-            session_id=session_id,
-            json={"style": "Continuous", "color": color_hex, "weight": "Thin"},
-        )
-
-
 def graph_set_column_width(
     graph_token: str, item_id: str, sheet_name: str, address: str, session_id: str, width_pt: float
 ) -> None:
@@ -278,25 +260,9 @@ def ensure_summary_file_exists(graph_token: str, remote_path: str) -> dict[str, 
         return graph_get_drive_item(graph_token, remote_path)
 
 
-def group_rows_by_date(
-    rows: list[dict[str, Any]], today: date, window_end: date
-) -> list[tuple[date, list[dict[str, Any]]]]:
-    """today〜window_end の全日付を順に、その日の案件行とセットで返す（0件の日も含む）。"""
-    by_date: dict[date, list[dict[str, Any]]] = {}
-    for row in rows:
-        by_date.setdefault(row["_出荷日付"], []).append(row)
-
-    result: list[tuple[date, list[dict[str, Any]]]] = []
-    d = today
-    while d <= window_end:
-        result.append((d, by_date.get(d, [])))
-        d += timedelta(days=1)
-    return result
-
-
-# F列(型式)・G列(車型)は営業用Excelの見出し文字のままだと意味が伝わらないため、
+# E列(備考)・F列(型式)・G列(車型)は営業用Excelの見出し文字のままだと意味が伝わらないため、
 # サマリー側だけ表示ラベルを上書きする（列番号=SUMMARY_OUTPUT_COLUMNSのindexで指定、データ自体は変えない）。
-HEADER_LABEL_OVERRIDES = {5: "備考①", 6: "備考②"}
+HEADER_LABEL_OVERRIDES = {4: "備考①", 5: "備考②", 6: "車型"}
 
 
 def fetch_main_header_row(graph_token: str, config: dict[str, Any]) -> list[str]:
@@ -323,25 +289,16 @@ def build_summary_layout(
     header_values: list[str],
     today: date,
     window_end: date,
-    config: dict[str, Any],
 ) -> dict[str, Any]:
-    """営業用Excelと同じA〜G列構成で、書き込む値・塗り色・フォント・行高さ・結合行を組み立てる。
+    """営業用Excelと同じA〜G列構成で、書き込む値・行高さを組み立てる（出荷日昇順のフラットな一覧）。
 
-    値は全文Graph APIで一括PATCHするため、行ごとに分けず1枚の2次元配列にする。
+    色付けはExcelの本テーブル機能（テーブルスタイル）に任せるため、ここでは塗り色は作らない。
     """
     case_max = len(SUMMARY_OUTPUT_COLUMNS)
     last_col_letter = col_letter_from_index(case_max)
-    highlight_keys = set(load_case_name_row_color_map(config).keys())
 
     matrix: list[list[Any]] = []
-    fills: list[tuple[str, str]] = []
     row_heights: list[tuple[int, float]] = []
-    merge_addresses: list[str] = []
-    # (address, font_props) — フォント設定は行レンジ単位でまとめて適用する
-    fonts: list[tuple[str, dict[str, Any]]] = []
-
-    def row_range(r: int) -> str:
-        return f"A{r}:{last_col_letter}{r}"
 
     matrix.append(
         [
@@ -353,44 +310,21 @@ def build_summary_layout(
             *([""] * (case_max - 1)),
         ]
     )
-    fonts.append((row_range(1), {"name": MAIN_FONT_NAME, "size": MAIN_FONT_SIZE, "bold": True}))
     for _ in range(2, HEADER_ROW):
         matrix.append([""] * case_max)
 
     matrix.append((header_values[:case_max] + [""] * case_max)[:case_max])
     row_heights.append((HEADER_ROW, MAIN_ROW_HEIGHT))
-    fonts.append((row_range(HEADER_ROW), {"name": MAIN_FONT_NAME, "size": MAIN_FONT_SIZE, "bold": True}))
 
     row_num = HEADER_ROW
-    for day, day_rows in group_rows_by_date(rows, today, window_end):
+    for row in rows:
         row_num += 1
-        matrix.append([""] * case_max)
-        row_heights.append((row_num, SPACER_ROW_HEIGHT))
-
-        row_num += 1
-        date_header_row = [f"{format_date_label(day)} 出荷数：{len(day_rows)}件"] + [""] * (case_max - 1)
-        matrix.append(date_header_row)
-        fills.append((row_range(row_num), DATE_HEADER_FILL_HEX))
-        row_heights.append((row_num, DATE_HEADER_ROW_HEIGHT))
-        merge_addresses.append(row_range(row_num))
-        fonts.append(
-            (row_range(row_num), {"name": MAIN_FONT_NAME, "size": MAIN_FONT_SIZE, "bold": True, "color": "#FFFFFF"})
-        )
-
-        for day_row in day_rows:
-            row_num += 1
-            darken = is_darkened_case(str(day_row.get("案件名", "")), highlight_keys)
-            matrix.append([cell_output_value(day_row, name) for name in SUMMARY_OUTPUT_COLUMNS])
-            fills.append((row_range(row_num), YOKOMOCHI_FILL_HEX if darken else CASE_INFO_FILL_HEX))
-            row_heights.append((row_num, MAIN_ROW_HEIGHT))
-            fonts.append((row_range(row_num), {"name": MAIN_FONT_NAME, "size": MAIN_FONT_SIZE, "bold": False}))
+        matrix.append([cell_output_value(row, name) for name in SUMMARY_OUTPUT_COLUMNS])
+        row_heights.append((row_num, MAIN_ROW_HEIGHT))
 
     return {
         "matrix": matrix,
-        "fills": fills,
         "row_heights": row_heights,
-        "merge_addresses": merge_addresses,
-        "fonts": fonts,
         "last_row": row_num,
         "last_col_letter": last_col_letter,
     }
@@ -404,12 +338,16 @@ def write_summary_via_graph(
     remote_path: str,
     layout: dict[str, Any],
 ) -> None:
-    """Excel Workbook API（範囲PATCH）で書き込む。ファイルが開かれていても更新できる。"""
+    """Excel Workbook API（範囲PATCH・本テーブル機能）で書き込む。ファイルが開かれていても更新できる。"""
     item = ensure_summary_file_exists(graph_token, remote_path)
     item_id = item["id"]
     session_id = graph_create_workbook_session(graph_token, item_id)
     try:
         sheet_name = graph_resolve_worksheet_name(graph_token, item_id, DEFAULT_SHEET_NAME, session_id)
+
+        # テーブルは範囲が変わるごとに削除→再作成する（resizeより確実）
+        for table in graph_list_tables_on_sheet(graph_token, item_id, sheet_name, session_id):
+            graph_delete_table(graph_token, item_id, str(table["name"]), session_id)
 
         # 前回の結合・書式が残っていると新しい範囲への書き込みでズレるため、まず解除してクリア
         graph_unmerge_range(graph_token, item_id, sheet_name, CLEAR_RANGE, session_id)
@@ -424,17 +362,19 @@ def write_summary_via_graph(
             graph_token, item_id, sheet_name, data_address, session_id,
             horizontal="Center", vertical="Center", wrap_text=True,
         )
+        graph_set_range_font(
+            graph_token, item_id, sheet_name, data_address, session_id,
+            name=MAIN_FONT_NAME, size=MAIN_FONT_SIZE,
+        )
+        graph_set_range_font(
+            graph_token, item_id, sheet_name, f"A1:{last_col_letter}1", session_id, bold=True,
+        )
 
-        for address in layout["merge_addresses"]:
-            graph_merge_range(graph_token, item_id, sheet_name, address, session_id)
-
-        graph_batch_patch_fills(graph_token, item_id, sheet_name, layout["fills"], session_id)
         graph_batch_set_row_heights(graph_token, item_id, sheet_name, layout["row_heights"], session_id)
 
-        for address, font_props in layout["fonts"]:
-            graph_set_range_font(graph_token, item_id, sheet_name, address, session_id, **font_props)
-
-        graph_set_range_borders(graph_token, item_id, sheet_name, data_address, session_id, BORDER_COLOR_HEX)
+        table_address = f"A{HEADER_ROW}:{last_col_letter}{last_row}"
+        table_name = graph_create_table(graph_token, item_id, sheet_name, table_address, session_id)
+        graph_set_table_style(graph_token, item_id, table_name, session_id, TABLE_STYLE_NAME)
 
         for col_letter, width_pt in MAIN_COLUMN_WIDTH_PT.items():
             graph_set_column_width(
@@ -484,7 +424,7 @@ def run_summary(dry_run: bool = False, force_login: bool = False) -> int:
             force_login=force_login,
         )
         header_values = fetch_main_header_row(graph_token, config)
-        layout = build_summary_layout(ship_rows, header_values, today, window_end, config)
+        layout = build_summary_layout(ship_rows, header_values, today, window_end)
         remote_path = config.get("shipping_summary_path", DEFAULT_OUTPUT_PATH)
         write_summary_via_graph(graph_token, remote_path, layout)
         logging.info("出荷日サマリーを更新しました: %s (%d件)", remote_path, len(ship_rows))
