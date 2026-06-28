@@ -52,6 +52,7 @@ from driver_sync import (
     release_process_lock,
     rotate_log_if_needed,
     setup_logging,
+    to_md,
     upload_onedrive_excel,
     worksheet_segment,
 )
@@ -69,6 +70,59 @@ DEFAULT_DAYS_AHEAD = 3
 # 営業用Excelと同じ列構成（A〜G）をそのまま使う
 SUMMARY_OUTPUT_COLUMNS = ["案件No", "案件名", "出荷日", "着日", "備考", "型式", "車型"]
 HEADER_ROW = 6
+
+# KSサポート（出荷日サマリー専用の追加抽出元。営業用Excel側の4社とは別枠・別構造のため
+# driver_sync_config.json の sources / SHEET_CONFIG には追加せず、ここに直接持つ）。
+# レイアウト: 4行目が見出し、5行目からデータ。A=ステータス B=案件No C=出荷日 D=着日
+# E=着時間 F=納入先住所 G=届け先名(=案件名) H=出荷工場 I=製品種別。
+KS_SOURCE_SHARE_URL = (
+    "https://onedrive.live.com/:x:/g/personal/1331A7580E0E4466/"
+    "IQBmRA4OWKcxIIAThgEAAAAAAU-iRPzHNuNnvea3gng6R4w"
+    "?rtime=Cylv1YGT3kg&redeem=aHR0cHM6Ly8xZHJ2Lm1zL3gvYy8xMzMxQTc1ODBFMEU0NDY2L0lRQm1SQTRPV0tjeElJQVRoZ0VBQUFBQUFVLWlSUHpITnVObnZlYTNnbmc2UjR3P2U9NDo2YVpUUEgmc2hhcmluZ3YyPXRydWUmZnJvbVNoYXJlPXRydWUmYXQ9OQ"
+)
+KS_SOURCE_KEY = "ks"
+KS_SHEET_NAME = "車両依頼書"
+KS_HEADER_ROWS = 4
+KS_STATUS_COL = 1
+KS_AN_NO_COL = 2
+KS_SHIP_COL = 3
+KS_ARR_COL = 4
+KS_CASE_NAME_COL = 7
+KS_PRODUCT_TYPE_COL = 9
+KS_ACCEPT_STATUS = "配車確定"
+KS_CAR_TYPE_LABEL = "KS"
+
+
+def extract_ks_rows(workbook: openpyxl.Workbook, today: date) -> list[dict[str, Any]]:
+    """KSサポートの依頼書から、ステータスが「配車確定」の行だけを抽出する。
+
+    製品種別(I列)は備考②（出力上は「型式」キー）に、車型は固定で「KS」と表示する。
+    """
+    ws = workbook[KS_SHEET_NAME]
+    rows: list[dict[str, Any]] = []
+    for r in range(KS_HEADER_ROWS + 1, ws.max_row + 1):
+        status = str(ws.cell(row=r, column=KS_STATUS_COL).value or "").strip()
+        if status != KS_ACCEPT_STATUS:
+            continue
+        an_no = str(ws.cell(row=r, column=KS_AN_NO_COL).value or "").strip()
+        case_name = str(ws.cell(row=r, column=KS_CASE_NAME_COL).value or "").strip()
+        if not an_no and not case_name:
+            continue
+        product_type = str(ws.cell(row=r, column=KS_PRODUCT_TYPE_COL).value or "").strip()
+        rows.append(
+            {
+                "案件No": an_no,
+                "案件名": case_name,
+                "出荷日": to_md(ws.cell(row=r, column=KS_SHIP_COL).value, today),
+                "着日": to_md(ws.cell(row=r, column=KS_ARR_COL).value, today),
+                "備考": "",
+                "型式": product_type,
+                "車型": KS_CAR_TYPE_LABEL,
+                "依頼先": KS_SOURCE_KEY,
+                "行キー": f"{KS_SOURCE_KEY}|{KS_SHEET_NAME}|{r}",
+            }
+        )
+    return rows
 
 
 def ship_window_end(today: date, days_ahead: int = DEFAULT_DAYS_AHEAD) -> date:
@@ -149,6 +203,15 @@ def collect_all_rows(config: dict[str, Any], today: date, window_end: date) -> l
         workbook.close()
         logging.info("抽出件数: %s = %d", key, len(rows))
         all_rows.extend(rows)
+
+    logging.info("取得中: %s", KS_SOURCE_KEY)
+    ks_content = download_share_file(KS_SOURCE_SHARE_URL)
+    ks_workbook = openpyxl.load_workbook(BytesIO(ks_content), read_only=False, data_only=True)
+    ks_rows = extract_ks_rows(ks_workbook, today)
+    ks_workbook.close()
+    logging.info("抽出件数: %s = %d", KS_SOURCE_KEY, len(ks_rows))
+    all_rows.extend(ks_rows)
+
     return prepare_rows_for_output(all_rows, today)
 
 
@@ -198,6 +261,8 @@ DATE_HEADER_ROW_HEIGHT = 24.0
 # それ以外の通常案件は薄い灰色で統一する（テーブルスタイルの交互配色を上書きする）。
 HIGHLIGHT_CASE_FILL_HEX = "#E6E6E6"
 DEFAULT_DATA_ROW_FILL_HEX = "#F7F7F7"
+# KSサポート分は出荷元が異なるため薄い赤色で区別する
+KS_ROW_FILL_HEX = "#FFC7CE"
 
 # 法人格表記（株式会社/㈱ など）の有無が案件名表記でブレるため、driver_sync_config.json の
 # row_colors_by_case_name には一致しない場合がある（例:「司企業株式会社　鳥栖営業所」と
@@ -423,7 +488,9 @@ def build_summary_layout(
             matrix.append([cell_output_value(row, name) for name in SUMMARY_OUTPUT_COLUMNS])
             row_heights.append((row_num, MAIN_ROW_HEIGHT))
             case_name = str(row.get("案件名", ""))
-            if is_relay_highlight_case_name(case_name, color_map):
+            if row.get("依頼先") == KS_SOURCE_KEY:
+                data_row_fills.append((row_num, KS_ROW_FILL_HEX))
+            elif is_relay_highlight_case_name(case_name, color_map):
                 data_row_fills.append((row_num, HIGHLIGHT_CASE_FILL_HEX))
             else:
                 data_row_fills.append((row_num, DEFAULT_DATA_ROW_FILL_HEX))
