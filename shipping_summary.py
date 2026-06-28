@@ -294,11 +294,31 @@ def filter_rows_by_ship_window(
     return filtered
 
 
-def sort_rows_by_ship_date(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """出荷日の昇順（同日内は案件No順）に並べ替える。"""
+def row_sort_category(row: dict[str, Any], color_map: dict[str, str]) -> int:
+    """同日内の表示順カテゴリ: KS→パーツ→横持ち→横持ち以外（直行）。"""
+    source = row.get("依頼先")
+    if source == KS_SOURCE_KEY:
+        return 0
+    if source == PARTS_SOURCE_KEY:
+        return 1
+    if is_relay_highlight_case_name(str(row.get("案件名", "")), color_map):
+        return 2
+    return 3
+
+
+def sort_rows_by_ship_date(
+    rows: list[dict[str, Any]], color_map: dict[str, str] | None = None
+) -> list[dict[str, Any]]:
+    """出荷日の昇順、同日内はKS→パーツ→横持ち→横持ち以外（直行）の順、
+    さらに同カテゴリ内は案件No順に並べ替える。"""
+    color_map = color_map or {}
     return sorted(
         rows,
-        key=lambda r: (r["_出荷日付"], str(r.get("案件No", ""))),
+        key=lambda r: (
+            r["_出荷日付"],
+            row_sort_category(r, color_map),
+            str(r.get("案件No", "")),
+        ),
     )
 
 
@@ -697,9 +717,11 @@ def run_summary(dry_run: bool = False, force_login: bool = False) -> int:
             window_end,
         )
 
+        color_map = load_case_name_row_color_map(config)
+
         all_rows = collect_all_rows(config, today, window_end)
         ship_rows = filter_rows_by_ship_window(all_rows, today, window_end)
-        ship_rows = sort_rows_by_ship_date(ship_rows)
+        ship_rows = sort_rows_by_ship_date(ship_rows, color_map)
 
         counts: dict[date, int] = {}
         for row in ship_rows:
@@ -728,7 +750,6 @@ def run_summary(dry_run: bool = False, force_login: bool = False) -> int:
             force_login=force_login,
         )
         header_values = fetch_main_header_row(graph_token, config)
-        color_map = load_case_name_row_color_map(config)
         layout = build_summary_layout(ship_rows, header_values, today, window_end, color_map)
         remote_path = config.get("shipping_summary_path", DEFAULT_OUTPUT_PATH)
         write_summary_via_graph(graph_token, remote_path, layout)
