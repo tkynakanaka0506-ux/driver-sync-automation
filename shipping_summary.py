@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from io import BytesIO
@@ -30,6 +31,7 @@ from driver_sync import (
     col_letter_from_index,
     download_share_file,
     extract_rows_from_workbook,
+    graph_batch_clear_fills,
     graph_batch_patch_fills,
     graph_batch_set_row_heights,
     graph_close_workbook_session,
@@ -44,6 +46,7 @@ from driver_sync import (
     is_highlight_case_name,
     load_case_name_row_color_map,
     load_config,
+    normalize_case_name_key,
     prepare_rows_for_output,
     release_process_lock,
     rotate_log_if_needed,
@@ -182,6 +185,25 @@ DATE_HEADER_FILL_HEX = "#000000"
 DATE_HEADER_ROW_HEIGHT = 24.0
 # 横持ち等の強調行は営業用Excel側の薄い青ではなく、サマリーでは少し濃めの灰色で区別する
 HIGHLIGHT_CASE_FILL_HEX = "#A6A6A6"
+
+# 法人格表記（株式会社/㈱ など）の有無が案件名表記でブレるため、driver_sync_config.json の
+# row_colors_by_case_name には一致しない場合がある（例:「司企業株式会社　鳥栖営業所」と
+# 「司企業　鳥栖営業所」）。サマリー側だけ、法人格表記を取り除いた上で再照合する。
+CORPORATE_AFFIXES = ("株式会社", "㈱", "(本社)", "（本社）")
+
+
+def normalize_case_name_loose(name: str) -> str:
+    text = normalize_case_name_key(name)
+    for affix in CORPORATE_AFFIXES:
+        text = text.replace(affix, "")
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def is_relay_highlight_case_name(case_name: str, color_map: dict[str, str]) -> bool:
+    if is_highlight_case_name(case_name, color_map):
+        return True
+    loose_name = normalize_case_name_loose(case_name)
+    return any(loose_name == normalize_case_name_loose(key) for key in color_map)
 
 
 def graph_range_format_url(item_id: str, sheet_name: str, address: str) -> str:
@@ -370,7 +392,7 @@ def build_summary_layout(
             matrix.append([cell_output_value(row, name) for name in SUMMARY_OUTPUT_COLUMNS])
             row_heights.append((row_num, MAIN_ROW_HEIGHT))
             case_name = str(row.get("案件名", ""))
-            if is_highlight_case_name(case_name, color_map):
+            if is_relay_highlight_case_name(case_name, color_map):
                 data_row_fills.append((row_num, HIGHLIGHT_CASE_FILL_HEX))
 
     return {
@@ -399,9 +421,12 @@ def write_summary_via_graph(
     try:
         sheet_name = graph_resolve_worksheet_name(graph_token, item_id, DEFAULT_SHEET_NAME, session_id)
 
-        # 罫線など手動で編集した書式は壊さないよう、値だけクリアする（書式はクリアしない）
+        # 罫線など手動で編集した書式は壊さないよう、値だけクリアする（書式はクリアしない）。
+        # ただし塗り色だけは前回実行分が残ると行数減少時に古い黒/灰色が残ってしまうため、
+        # 罫線は触らずに塗り色のみリセットしてから今回分を塗り直す。
         graph_unmerge_range(graph_token, item_id, sheet_name, CLEAR_RANGE, session_id)
         graph_clear_range(graph_token, item_id, sheet_name, CLEAR_RANGE, session_id, apply_to="Contents")
+        graph_batch_clear_fills(graph_token, item_id, sheet_name, [CLEAR_RANGE], session_id)
 
         last_row = layout["last_row"]
         last_col_letter = layout["last_col_letter"]
