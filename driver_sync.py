@@ -2738,9 +2738,9 @@ def upload_onedrive_excel(graph_token: str, remote_path: str, content: bytes) ->
             continue
         if res.status_code == 423:
             raise RuntimeError(
-                "OneDriveアップロード失敗: ファイルがロックされています。"
-                "「ドライバー情報_営業用.xlsx」を Excel Online で開いているタブを"
-                "すべて閉じてから、もう一度 python driver_sync.py を実行してください。"
+                f"OneDriveアップロード失敗: ファイルがロックされています。"
+                f"「{remote_path}」を Excel Online で開いているタブを"
+                f"すべて閉じてから、もう一度実行してください。"
             )
         raise RuntimeError(f"OneDriveアップロード失敗: {res.status_code} {res.text[:300]}")
 
