@@ -47,6 +47,7 @@ MASK_TEXT = "***"
 MASKED_COLUMN_WIDTH = 180.0  # 携帯番号列の通常表示幅
 PASSWORD_INPUT_CELL = "B2"  # ここにパスワードを入力する
 PASSWORD_INPUT_CELL_ABS = "$B$2"
+PASSWORD_INPUT_DISPLAY_FORMAT = '"****"'  # 入力確定後は****と表示（実際の値は保持）
 PASSWORD_LABEL_CELL = "A2"
 PASSWORD_STORAGE_CELL = "O2"  # 合言葉の正解を保存（K/L列1行目はG1:L1のマージセルで書込不可だったため別セルに変更）
 PASSWORD_STORAGE_CELL_ABS = "$O$2"
@@ -2161,6 +2162,32 @@ def graph_patch_range_values(
         )
 
 
+def graph_set_number_format(
+    graph_token: str,
+    item_id: str,
+    sheet_name: str,
+    address: str,
+    number_format: str,
+    session_id: str,
+) -> None:
+    seg = worksheet_segment(sheet_name)
+    url = (
+        f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/"
+        f"{seg}/range(address='{address}')"
+    )
+    res = graph_request_with_retry(
+        "PATCH",
+        url,
+        graph_token,
+        session_id=session_id,
+        json={"numberFormat": [[number_format]]},
+    )
+    if not res.ok:
+        raise RuntimeError(
+            f"表示形式設定失敗({address}): {res.status_code} {res.text[:300]}"
+        )
+
+
 def graph_set_wrap_text(
     graph_token: str,
     item_id: str,
@@ -2779,6 +2806,10 @@ def update_onedrive_values_only(
             graph_patch_range_values(
                 graph_token, item_id, ws_name,
                 TARGET_CASE_LABEL_CELL, [["案件No→"]], session_id,
+            )
+            graph_set_number_format(
+                graph_token, item_id, ws_name,
+                PASSWORD_INPUT_CELL, PASSWORD_INPUT_DISPLAY_FORMAT, session_id,
             )
             graph_set_column_width(
                 graph_token, item_id, ws_name, "O", 0, session_id,
