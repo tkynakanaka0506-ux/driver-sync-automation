@@ -465,6 +465,10 @@ def write_summary_via_graph(
         graph_set_range_font(
             graph_token, item_id, sheet_name, f"A1:{last_col_letter}1", session_id, bold=True,
         )
+        graph_set_range_font(
+            graph_token, item_id, sheet_name, f"A{HEADER_ROW}:{last_col_letter}{HEADER_ROW}", session_id,
+            color="#FFFFFF", bold=True,
+        )
 
         fills = [
             (f"A{r}:{last_col_letter}{r}", DATE_HEADER_FILL_HEX) for r in layout["date_header_fill_rows"]
@@ -484,7 +488,7 @@ def write_summary_via_graph(
             # 「選択範囲内で中央」（CenterAcrossSelection）を使う。
             graph_set_range_alignment(
                 graph_token, item_id, sheet_name, f"A{r}:{last_col_letter}{r}", session_id,
-                horizontal="CenterAcrossSelection", vertical="Center", wrap_text=True,
+                horizontal="CenterAcrossSelection", vertical="Center", wrap_text=False,
             )
 
         graph_batch_set_row_heights(graph_token, item_id, sheet_name, layout["row_heights"], session_id)
