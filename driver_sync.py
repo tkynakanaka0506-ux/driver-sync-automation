@@ -45,6 +45,9 @@ PROTECTED_HIDDEN_COLUMN_NAMES = ("携帯番号秘",)  # 非表示+シート保�
 MASKED_COLUMN_NAMES = ("携帯番号",)  # 見える列だが値は***でマスクする
 MASK_TEXT = "***"
 MASKED_COLUMN_WIDTH = 100.0  # 携帯番号列の通常表示幅
+PASSWORD_INPUT_CELL = "J1"  # ここにパスワードを入力すると携帯番号列が一時的に見える
+PASSWORD_INPUT_COLUMN_LETTER = "J"
+PASSWORD_LABEL_CELL = "I1"
 LOG_PATH = SCRIPT_DIR / "driver_sync.log"
 TASK_LOG_PATH = SCRIPT_DIR / "driver_sync_task.log"
 STATUS_PATH = SCRIPT_DIR / "driver_sync_status.json"
@@ -1746,14 +1749,27 @@ def rows_to_xlsx_bytes(rows: list[dict[str, Any]], config: dict[str, Any] | None
     return buf.getvalue()
 
 
-def cell_output_value(row: dict[str, Any], col_name: str) -> Any:
+def cell_output_value(
+    row: dict[str, Any],
+    col_name: str,
+    hidden_col_letter: str | None = None,
+    excel_row: int | None = None,
+) -> Any:
     value = row.get(col_name, "")
     if value is None:
         return ""
     if col_name == "依頼先":
         return SOURCE_DISPLAY_NAMES.get(str(value), str(value))
     if col_name in MASKED_COLUMN_NAMES:
-        return MASK_TEXT if str(value).strip() else ""
+        if not str(value).strip():
+            return ""
+        if hidden_col_letter and excel_row:
+            # $J$1（パスワード入力欄）が隠し列1行目の合言葉と一致した時だけ本物を表示。
+            return (
+                f"=IF(${PASSWORD_INPUT_COLUMN_LETTER}$1=${hidden_col_letter}$1,"
+                f"{hidden_col_letter}{excel_row},\"{MASK_TEXT}\")"
+            )
+        return MASK_TEXT
     return value
 
 
@@ -2272,15 +2288,26 @@ def parse_header_column_map(header_values: list[list[Any]]) -> dict[str, int]:
 def build_range_values(
     rows: list[dict[str, Any]],
     col_map: dict[str, int],
+    data_start_row: int,
 ) -> tuple[list[list[Any]], int, int]:
     min_col = min(col_map.values())
     max_col = max(col_map.values())
     width = max_col - min_col + 1
+    hidden_col_idx = next(
+        (col_map[name] for name in PROTECTED_HIDDEN_COLUMN_NAMES if name in col_map),
+        None,
+    )
+    hidden_col_letter = (
+        col_letter_from_index(hidden_col_idx) if hidden_col_idx else None
+    )
     matrix: list[list[Any]] = []
-    for row in rows:
+    for offset, row in enumerate(rows):
+        excel_row = data_start_row + offset
         line = [""] * width
         for name, col_idx in col_map.items():
-            line[col_idx - min_col] = cell_output_value(row, name)
+            line[col_idx - min_col] = cell_output_value(
+                row, name, hidden_col_letter, excel_row
+            )
         matrix.append(line)
     return matrix, min_col, max_col
 
@@ -2559,7 +2586,9 @@ def update_onedrive_values_only(
         )
 
         if rows:
-            matrix, write_min_col, write_max_col = build_range_values(rows, col_map)
+            matrix, write_min_col, write_max_col = build_range_values(
+                rows, col_map, data_start_row
+            )
             data_address = range_address(
                 write_min_col, write_max_col, data_start_row, data_end_row
             )
@@ -2719,6 +2748,15 @@ def update_onedrive_values_only(
                         graph_token, item_id, ws_name,
                         col_letter_from_index(hidden_col), 0, session_id,
                     )
+                    hidden_col_letter = col_letter_from_index(hidden_col)
+                    graph_patch_range_values(
+                        graph_token, item_id, ws_name,
+                        f"{hidden_col_letter}1", [[sheet_password]], session_id,
+                    )
+            graph_patch_range_values(
+                graph_token, item_id, ws_name,
+                PASSWORD_LABEL_CELL, [["携帯番号PW→"]], session_id,
+            )
             apply_phone_column_protection_scope(
                 graph_token, item_id, ws_name, col_map, session_id
             )
