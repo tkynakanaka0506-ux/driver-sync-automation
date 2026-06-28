@@ -185,7 +185,7 @@ DATE_HEADER_FILL_HEX = "#000000"
 DATE_HEADER_ROW_HEIGHT = 24.0
 # 横持ち等の強調行は営業用Excel側の薄い青ではなく、サマリーでは少し濃めの灰色で区別する。
 # それ以外の通常案件は薄い灰色で統一する（テーブルスタイルの交互配色を上書きする）。
-HIGHLIGHT_CASE_FILL_HEX = "#A6A6A6"
+HIGHLIGHT_CASE_FILL_HEX = "#BFBFBF"
 DEFAULT_DATA_ROW_FILL_HEX = "#D9D9D9"
 
 # 法人格表記（株式会社/㈱ など）の有無が案件名表記でブレるため、driver_sync_config.json の
@@ -471,6 +471,11 @@ def write_summary_via_graph(
         else:
             table_name = graph_create_table(graph_token, item_id, sheet_name, table_address, session_id)
             graph_set_table_style(graph_token, item_id, table_name, session_id, TABLE_STYLE_NAME)
+
+        # テーブル全体に黒の格子罫線を描く（出荷数行だけは後段で白に上書きする）
+        graph_set_range_border_color(
+            graph_token, item_id, sheet_name, table_address, session_id, "#000000",
+        )
 
         graph_set_range_alignment(
             graph_token, item_id, sheet_name, data_address, session_id,
