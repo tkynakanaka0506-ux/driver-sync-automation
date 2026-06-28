@@ -346,7 +346,7 @@ DATE_HEADER_ROW_HEIGHT = 24.0
 HIGHLIGHT_CASE_FILL_HEX = "#E6E6E6"
 DEFAULT_DATA_ROW_FILL_HEX = "#F7F7F7"
 # KSサポート分は出荷元が異なるため薄い赤色で区別する
-KS_ROW_FILL_HEX = "#FFC7CE"
+KS_ROW_FILL_HEX = "#FFE3E6"
 
 # 法人格表記（株式会社/㈱ など）の有無が案件名表記でブレるため、driver_sync_config.json の
 # row_colors_by_case_name には一致しない場合がある（例:「司企業株式会社　鳥栖営業所」と
