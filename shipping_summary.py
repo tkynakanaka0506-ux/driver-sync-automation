@@ -462,7 +462,11 @@ def write_summary_via_graph(
         graph_batch_clear_fills(graph_token, item_id, sheet_name, [CLEAR_RANGE], session_id)
         # 文字色も塗り色と同様、前回実行分の白文字（出荷数行用）が行数減少時に残ってしまう
         # ため、罫線以外を触らない範囲で文字色だけ黒にリセットしてから塗り直す。
-        graph_set_range_font(graph_token, item_id, sheet_name, CLEAR_RANGE, session_id, color="#000000")
+        # 太字も塗り色・文字色と同様、前回実行分のタイトル行/見出し行用の太字が
+        # 行数減少時に残ってしまうため、罫線以外を触らない範囲で太字もリセットする。
+        graph_set_range_font(
+            graph_token, item_id, sheet_name, CLEAR_RANGE, session_id, color="#000000", bold=False,
+        )
 
         last_row = layout["last_row"]
         last_col_letter = layout["last_col_letter"]
