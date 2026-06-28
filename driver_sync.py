@@ -45,9 +45,11 @@ PROTECTED_HIDDEN_COLUMN_NAMES = ("携帯番号秘",)  # 非表示+シート保�
 MASKED_COLUMN_NAMES = ("携帯番号",)  # 見える列だが値は***でマスクする
 MASK_TEXT = "***"
 MASKED_COLUMN_WIDTH = 100.0  # 携帯番号列の通常表示幅
-PASSWORD_INPUT_CELL = "J1"  # ここにパスワードを入力すると携帯番号列が一時的に見える
-PASSWORD_INPUT_COLUMN_LETTER = "J"
-PASSWORD_LABEL_CELL = "I1"
+PASSWORD_INPUT_CELL = "P1"  # ここにパスワードを入力すると携帯番号列が一時的に見える
+PASSWORD_INPUT_COLUMN_LETTER = "P"
+PASSWORD_LABEL_CELL = "O1"
+PASSWORD_STORAGE_CELL = "O2"  # 合言葉の正解を保存（K/L列1行目はG1:L1のマージセルで書込不可だったため別セルに変更）
+PASSWORD_STORAGE_CELL_ABS = "$O$2"
 LOG_PATH = SCRIPT_DIR / "driver_sync.log"
 TASK_LOG_PATH = SCRIPT_DIR / "driver_sync_task.log"
 STATUS_PATH = SCRIPT_DIR / "driver_sync_status.json"
@@ -1764,9 +1766,9 @@ def cell_output_value(
         if not str(value).strip():
             return ""
         if hidden_col_letter and excel_row:
-            # $J$1（パスワード入力欄）が隠し列1行目の合言葉と一致した時だけ本物を表示。
+            # パスワード入力欄が合言葉セルと一致した時だけ本物を表示。
             return (
-                f"=IF(${PASSWORD_INPUT_COLUMN_LETTER}$1=${hidden_col_letter}$1,"
+                f"=IF(${PASSWORD_INPUT_COLUMN_LETTER}$1={PASSWORD_STORAGE_CELL_ABS},"
                 f"{hidden_col_letter}{excel_row},\"{MASK_TEXT}\")"
             )
         return MASK_TEXT
@@ -2748,17 +2750,22 @@ def update_onedrive_values_only(
                         graph_token, item_id, ws_name,
                         col_letter_from_index(hidden_col), 0, session_id,
                     )
-                    hidden_col_letter = col_letter_from_index(hidden_col)
-                    graph_patch_range_values(
-                        graph_token, item_id, ws_name,
-                        f"{hidden_col_letter}1", [[sheet_password]], session_id,
-                    )
+            graph_patch_range_values(
+                graph_token, item_id, ws_name,
+                PASSWORD_STORAGE_CELL, [[sheet_password]], session_id,
+            )
             graph_patch_range_values(
                 graph_token, item_id, ws_name,
                 PASSWORD_LABEL_CELL, [["携帯番号PW→"]], session_id,
             )
+            graph_set_column_width(
+                graph_token, item_id, ws_name, "O", 0, session_id,
+            )
             apply_phone_column_protection_scope(
                 graph_token, item_id, ws_name, col_map, session_id
+            )
+            graph_set_range_locked(
+                graph_token, item_id, ws_name, "O1:O2", True, session_id,
             )
             graph_protect_worksheet(
                 graph_token, item_id, ws_name, session_id, sheet_password
