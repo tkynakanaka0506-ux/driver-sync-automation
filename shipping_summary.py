@@ -431,6 +431,9 @@ def write_summary_via_graph(
         graph_unmerge_range(graph_token, item_id, sheet_name, CLEAR_RANGE, session_id)
         graph_clear_range(graph_token, item_id, sheet_name, CLEAR_RANGE, session_id, apply_to="Contents")
         graph_batch_clear_fills(graph_token, item_id, sheet_name, [CLEAR_RANGE], session_id)
+        # 文字色も塗り色と同様、前回実行分の白文字（出荷数行用）が行数減少時に残ってしまう
+        # ため、罫線以外を触らない範囲で文字色だけ黒にリセットしてから塗り直す。
+        graph_set_range_font(graph_token, item_id, sheet_name, CLEAR_RANGE, session_id, color="#000000")
 
         last_row = layout["last_row"]
         last_col_letter = layout["last_col_letter"]
@@ -475,6 +478,12 @@ def write_summary_via_graph(
             graph_set_range_font(
                 graph_token, item_id, sheet_name, f"A{r}:{last_col_letter}{r}", session_id,
                 color="#FFFFFF", bold=True,
+            )
+            # 出荷数行は値がA列のみに入っているため、行全体に中央揃えを再適用しておく
+            # （フォント色のPATCHとは別エンドポイントだが、念のため最後にもう一度確定させる）
+            graph_set_range_alignment(
+                graph_token, item_id, sheet_name, f"A{r}:{last_col_letter}{r}", session_id,
+                horizontal="Center", vertical="Center", wrap_text=True,
             )
 
         graph_batch_set_row_heights(graph_token, item_id, sheet_name, layout["row_heights"], session_id)
