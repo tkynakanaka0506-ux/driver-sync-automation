@@ -420,6 +420,17 @@ def run_summary(dry_run: bool = False, force_login: bool = False) -> int:
         for d, count in sorted(counts.items()):
             logging.info("%s: %d件", format_date_label(d), count)
 
+        source_counts: dict[str, int] = {}
+        for row in ship_rows:
+            src = str(row.get("依頼先", ""))
+            source_counts[src] = source_counts.get(src, 0) + 1
+        logging.info("依頼先別件数(表示範囲内): %s", source_counts)
+        for row in ship_rows:
+            logging.info(
+                "出荷日サマリー対象行: 依頼先=%s 案件No=%s 出荷日=%s 案件名=%s",
+                row.get("依頼先", ""), row.get("案件No", ""), row.get("出荷日", ""), row.get("案件名", ""),
+            )
+
         if dry_run:
             logging.info("dry-run のため OneDrive 反映はスキップしました")
             return 0
