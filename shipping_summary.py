@@ -19,27 +19,35 @@ from typing import Any
 
 import jpholiday
 import openpyxl
-from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
 from driver_sync import (
+    GRAPH_BASE,
     GRAPH_SCOPES,
     JST,
     acquire_process_lock,
     acquire_token,
     cell_output_value,
+    col_letter_from_index,
     download_share_file,
     extract_rows_from_workbook,
+    graph_batch_patch_fills,
+    graph_batch_set_row_heights,
+    graph_close_workbook_session,
+    graph_create_workbook_session,
     graph_get_drive_item,
+    graph_patch_range_values,
     graph_read_range_values,
+    graph_request_with_retry,
+    graph_resolve_worksheet_name,
     load_case_name_row_color_map,
     load_config,
     normalize_case_name_key,
-    openpyxl_fill_from_hex,
     prepare_rows_for_output,
     release_process_lock,
     rotate_log_if_needed,
     setup_logging,
     upload_onedrive_excel,
+    worksheet_segment,
 )
 
 SCRIPT_DIR_LOG = "shipping_summary.log"
@@ -55,7 +63,6 @@ DEFAULT_DAYS_AHEAD = 3
 # 営業用Excelと同じ列構成（A〜G）をそのまま使う
 SUMMARY_OUTPUT_COLUMNS = ["案件No", "案件名", "出荷日", "着日", "備考", "型式", "車型"]
 HEADER_ROW = 6
-DATA_START_ROW = 7
 
 
 def ship_window_end(today: date, days_ahead: int = DEFAULT_DAYS_AHEAD) -> date:
@@ -154,8 +161,7 @@ def format_date_label(d: date) -> str:
 MAIN_FONT_NAME = "Meiryo"
 MAIN_FONT_SIZE = 13.0
 MAIN_ROW_HEIGHT = 81.75
-DATA_ALIGNMENT = Alignment(horizontal="center", vertical="center", wrap_text=True)
-# 列幅(pt)を実書式から取得し、openpyxlの文字幅単位に変換（目安: pt/7）
+# 列幅(pt)を実書式から取得（Graph APIのcolumnWidthはptそのまま使える）
 MAIN_COLUMN_WIDTH_PT = {"A": 113.25, "B": 264.0, "C": 74.25, "D": 78.0, "E": 119.25, "F": 355.5, "G": 126.75}
 # 案件情報の塗り色は若干グレーで統一（営業用Excelの案件名別ハイライトは使わない）
 CASE_INFO_FILL_HEX = "#EDEDED"
@@ -170,19 +176,106 @@ def is_darkened_case(case_name: str, highlight_keys: set[str]) -> bool:
     if YOKOMOCHI_KEYWORD in case_name:
         return True
     return normalize_case_name_key(case_name) in highlight_keys
+
+
 # 出荷日ごとの区切り見出し行（黒背景・白文字）
-DATE_HEADER_FILL_HEX = "FF000000"
-DATE_HEADER_FONT = Font(name=MAIN_FONT_NAME, size=MAIN_FONT_SIZE, bold=True, color="FFFFFFFF")
-DATE_HEADER_ALIGNMENT = Alignment(horizontal="center", vertical="center")
+DATE_HEADER_FILL_HEX = "#000000"
 DATE_HEADER_ROW_HEIGHT = 24
 SPACER_ROW_HEIGHT = 8
 # 表全体に罫線を引く（薄いグレー）
-TABLE_BORDER = Border(
-    left=Side(style="thin", color="FFBFBFBF"),
-    right=Side(style="thin", color="FFBFBFBF"),
-    top=Side(style="thin", color="FFBFBFBF"),
-    bottom=Side(style="thin", color="FFBFBFBF"),
-)
+BORDER_COLOR_HEX = "#BFBFBF"
+BORDER_SIDES = ("EdgeTop", "EdgeBottom", "EdgeLeft", "EdgeRight", "InsideHorizontal", "InsideVertical")
+
+
+def graph_range_format_url(item_id: str, sheet_name: str, address: str) -> str:
+    seg = worksheet_segment(sheet_name)
+    return f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/{seg}/range(address='{address}')/format"
+
+
+def graph_unmerge_range(graph_token: str, item_id: str, sheet_name: str, address: str, session_id: str) -> None:
+    seg = worksheet_segment(sheet_name)
+    url = f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/{seg}/range(address='{address}')/unmerge"
+    graph_request_with_retry("POST", url, graph_token, session_id=session_id)
+
+
+def graph_clear_range(
+    graph_token: str, item_id: str, sheet_name: str, address: str, session_id: str, apply_to: str = "All"
+) -> None:
+    seg = worksheet_segment(sheet_name)
+    url = f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/{seg}/range(address='{address}')/clear"
+    graph_request_with_retry("POST", url, graph_token, session_id=session_id, json={"applyTo": apply_to})
+
+
+def graph_merge_range(graph_token: str, item_id: str, sheet_name: str, address: str, session_id: str) -> None:
+    seg = worksheet_segment(sheet_name)
+    url = f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/{seg}/range(address='{address}')/merge"
+    graph_request_with_retry("POST", url, graph_token, session_id=session_id, json={"across": False})
+
+
+def graph_set_range_alignment(
+    graph_token: str,
+    item_id: str,
+    sheet_name: str,
+    address: str,
+    session_id: str,
+    *,
+    horizontal: str,
+    vertical: str,
+    wrap_text: bool,
+) -> None:
+    url = graph_range_format_url(item_id, sheet_name, address)
+    graph_request_with_retry(
+        "PATCH",
+        url,
+        graph_token,
+        session_id=session_id,
+        json={"horizontalAlignment": horizontal, "verticalAlignment": vertical, "wrapText": wrap_text},
+    )
+
+
+def graph_set_range_font(
+    graph_token: str, item_id: str, sheet_name: str, address: str, session_id: str, **font_props: Any
+) -> None:
+    url = f"{graph_range_format_url(item_id, sheet_name, address)}/font"
+    graph_request_with_retry("PATCH", url, graph_token, session_id=session_id, json=font_props)
+
+
+def graph_set_range_borders(
+    graph_token: str, item_id: str, sheet_name: str, address: str, session_id: str, color_hex: str
+) -> None:
+    fmt_url = graph_range_format_url(item_id, sheet_name, address)
+    for side in BORDER_SIDES:
+        url = f"{fmt_url}/borders('{side}')"
+        graph_request_with_retry(
+            "PATCH",
+            url,
+            graph_token,
+            session_id=session_id,
+            json={"style": "Continuous", "color": color_hex, "weight": "Thin"},
+        )
+
+
+def graph_set_column_width(
+    graph_token: str, item_id: str, sheet_name: str, address: str, session_id: str, width_pt: float
+) -> None:
+    url = graph_range_format_url(item_id, sheet_name, address)
+    graph_request_with_retry("PATCH", url, graph_token, session_id=session_id, json={"columnWidth": width_pt})
+
+
+def ensure_summary_file_exists(graph_token: str, remote_path: str) -> dict[str, Any]:
+    """サマリーExcelが無ければ、シート名だけのブックを新規作成する。"""
+    try:
+        return graph_get_drive_item(graph_token, remote_path)
+    except RuntimeError as exc:
+        if "404" not in str(exc):
+            raise
+        logging.info("サマリーExcelが存在しないため新規作成します: %s", remote_path)
+        wb = openpyxl.Workbook()
+        wb.active.title = DEFAULT_SHEET_NAME
+        buf = BytesIO()
+        wb.save(buf)
+        upload_onedrive_excel(graph_token, remote_path, buf.getvalue())
+        return graph_get_drive_item(graph_token, remote_path)
 
 
 def group_rows_by_date(
@@ -215,74 +308,130 @@ def fetch_main_header_row(graph_token: str, config: dict[str, Any]) -> list[str]
     return list(SUMMARY_OUTPUT_COLUMNS)
 
 
-def build_summary_xlsx_bytes(
+def build_summary_layout(
     rows: list[dict[str, Any]],
     header_values: list[str],
     today: date,
     window_end: date,
     config: dict[str, Any],
-) -> bytes:
-    """営業用Excelと同じA〜G列構成（6行目=見出し、7行目〜=データ）で出力する。"""
-    case_min, case_max = 1, len(SUMMARY_OUTPUT_COLUMNS)
+) -> dict[str, Any]:
+    """営業用Excelと同じA〜G列構成で、書き込む値・塗り色・フォント・行高さ・結合行を組み立てる。
+
+    値は全文Graph APIで一括PATCHするため、行ごとに分けず1枚の2次元配列にする。
+    """
+    case_max = len(SUMMARY_OUTPUT_COLUMNS)
+    last_col_letter = col_letter_from_index(case_max)
     highlight_keys = set(load_case_name_row_color_map(config).keys())
 
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = DEFAULT_SHEET_NAME
+    matrix: list[list[Any]] = []
+    fills: list[tuple[str, str]] = []
+    row_heights: list[tuple[int, float]] = []
+    merge_addresses: list[str] = []
+    # (address, font_props) — フォント設定は行レンジ単位でまとめて適用する
+    fonts: list[tuple[str, dict[str, Any]]] = []
 
-    ws["A1"] = (
-        f"最終更新: {datetime.now(JST).strftime('%Y/%m/%d %H:%M')}　"
-        f"（表示範囲: {format_date_label(today)}〜{format_date_label(window_end)}・"
-        f"{len(rows)}件）"
+    def row_range(r: int) -> str:
+        return f"A{r}:{last_col_letter}{r}"
+
+    matrix.append(
+        [
+            (
+                f"最終更新: {datetime.now(JST).strftime('%Y/%m/%d %H:%M')}　"
+                f"（表示範囲: {format_date_label(today)}〜{format_date_label(window_end)}・"
+                f"{len(rows)}件）"
+            ),
+            *([""] * (case_max - 1)),
+        ]
     )
-    ws["A1"].font = Font(name=MAIN_FONT_NAME, size=MAIN_FONT_SIZE, bold=True)
+    fonts.append((row_range(1), {"name": MAIN_FONT_NAME, "size": MAIN_FONT_SIZE, "bold": True}))
+    for _ in range(2, HEADER_ROW):
+        matrix.append([""] * case_max)
 
-    for col, text in enumerate(header_values[: len(SUMMARY_OUTPUT_COLUMNS)], start=1):
-        cell = ws.cell(HEADER_ROW, col, text)
-        cell.font = Font(name=MAIN_FONT_NAME, size=MAIN_FONT_SIZE, bold=True)
-        cell.alignment = DATA_ALIGNMENT
-        cell.border = TABLE_BORDER
-    ws.row_dimensions[HEADER_ROW].height = MAIN_ROW_HEIGHT
+    matrix.append((header_values[:case_max] + [""] * case_max)[:case_max])
+    row_heights.append((HEADER_ROW, MAIN_ROW_HEIGHT))
+    fonts.append((row_range(HEADER_ROW), {"name": MAIN_FONT_NAME, "size": MAIN_FONT_SIZE, "bold": True}))
 
-    last_col_letter = openpyxl.utils.get_column_letter(case_max)
-    row_num = DATA_START_ROW
+    row_num = HEADER_ROW
     for day, day_rows in group_rows_by_date(rows, today, window_end):
-        ws.row_dimensions[row_num].height = SPACER_ROW_HEIGHT
         row_num += 1
+        matrix.append([""] * case_max)
+        row_heights.append((row_num, SPACER_ROW_HEIGHT))
 
-        ws.merge_cells(f"A{row_num}:{last_col_letter}{row_num}")
-        header_cell = ws.cell(row_num, 1, f"{format_date_label(day)} 出荷数：{len(day_rows)}件")
-        header_cell.font = DATE_HEADER_FONT
-        header_cell.alignment = DATE_HEADER_ALIGNMENT
-        header_fill = PatternFill(start_color=DATE_HEADER_FILL_HEX, end_color=DATE_HEADER_FILL_HEX, fill_type="solid")
-        for col in range(case_min, case_max + 1):
-            ws.cell(row_num, col).fill = header_fill
-            ws.cell(row_num, col).border = TABLE_BORDER
-        ws.row_dimensions[row_num].height = DATE_HEADER_ROW_HEIGHT
         row_num += 1
+        date_header_row = [f"{format_date_label(day)} 出荷数：{len(day_rows)}件"] + [""] * (case_max - 1)
+        matrix.append(date_header_row)
+        fills.append((row_range(row_num), DATE_HEADER_FILL_HEX))
+        row_heights.append((row_num, DATE_HEADER_ROW_HEIGHT))
+        merge_addresses.append(row_range(row_num))
+        fonts.append(
+            (row_range(row_num), {"name": MAIN_FONT_NAME, "size": MAIN_FONT_SIZE, "bold": True, "color": "#FFFFFF"})
+        )
 
         for day_row in day_rows:
-            darken = is_darkened_case(str(day_row.get("案件名", "")), highlight_keys)
-            for col, name in enumerate(SUMMARY_OUTPUT_COLUMNS, start=1):
-                value = cell_output_value(day_row, name)
-                cell = ws.cell(row_num, col, value)
-                cell.font = Font(name=MAIN_FONT_NAME, size=MAIN_FONT_SIZE)
-                cell.alignment = DATA_ALIGNMENT
-
-            fill = openpyxl_fill_from_hex(YOKOMOCHI_FILL_HEX if darken else CASE_INFO_FILL_HEX)
-            for col in range(case_min, case_max + 1):
-                ws.cell(row_num, col).fill = fill
-                ws.cell(row_num, col).border = TABLE_BORDER
-
-            ws.row_dimensions[row_num].height = MAIN_ROW_HEIGHT
             row_num += 1
+            darken = is_darkened_case(str(day_row.get("案件名", "")), highlight_keys)
+            matrix.append([cell_output_value(day_row, name) for name in SUMMARY_OUTPUT_COLUMNS])
+            fills.append((row_range(row_num), YOKOMOCHI_FILL_HEX if darken else CASE_INFO_FILL_HEX))
+            row_heights.append((row_num, MAIN_ROW_HEIGHT))
+            fonts.append((row_range(row_num), {"name": MAIN_FONT_NAME, "size": MAIN_FONT_SIZE, "bold": False}))
 
-    for col_letter, width_pt in MAIN_COLUMN_WIDTH_PT.items():
-        ws.column_dimensions[col_letter].width = round(width_pt / 7, 1)
+    return {
+        "matrix": matrix,
+        "fills": fills,
+        "row_heights": row_heights,
+        "merge_addresses": merge_addresses,
+        "fonts": fonts,
+        "last_row": row_num,
+        "last_col_letter": last_col_letter,
+    }
 
-    buf = BytesIO()
-    wb.save(buf)
-    return buf.getvalue()
+
+CLEAR_RANGE = "A1:G500"
+
+
+def write_summary_via_graph(
+    graph_token: str,
+    remote_path: str,
+    layout: dict[str, Any],
+) -> None:
+    """Excel Workbook API（範囲PATCH）で書き込む。ファイルが開かれていても更新できる。"""
+    item = ensure_summary_file_exists(graph_token, remote_path)
+    item_id = item["id"]
+    session_id = graph_create_workbook_session(graph_token, item_id)
+    try:
+        sheet_name = graph_resolve_worksheet_name(graph_token, item_id, DEFAULT_SHEET_NAME, session_id)
+
+        # 前回の結合・書式が残っていると新しい範囲への書き込みでズレるため、まず解除してクリア
+        graph_unmerge_range(graph_token, item_id, sheet_name, CLEAR_RANGE, session_id)
+        graph_clear_range(graph_token, item_id, sheet_name, CLEAR_RANGE, session_id, apply_to="All")
+
+        last_row = layout["last_row"]
+        last_col_letter = layout["last_col_letter"]
+        data_address = f"A1:{last_col_letter}{last_row}"
+        graph_patch_range_values(graph_token, item_id, sheet_name, data_address, layout["matrix"], session_id)
+
+        graph_set_range_alignment(
+            graph_token, item_id, sheet_name, data_address, session_id,
+            horizontal="Center", vertical="Center", wrap_text=True,
+        )
+
+        for address in layout["merge_addresses"]:
+            graph_merge_range(graph_token, item_id, sheet_name, address, session_id)
+
+        graph_batch_patch_fills(graph_token, item_id, sheet_name, layout["fills"], session_id)
+        graph_batch_set_row_heights(graph_token, item_id, sheet_name, layout["row_heights"], session_id)
+
+        for address, font_props in layout["fonts"]:
+            graph_set_range_font(graph_token, item_id, sheet_name, address, session_id, **font_props)
+
+        graph_set_range_borders(graph_token, item_id, sheet_name, data_address, session_id, BORDER_COLOR_HEX)
+
+        for col_letter, width_pt in MAIN_COLUMN_WIDTH_PT.items():
+            graph_set_column_width(
+                graph_token, item_id, sheet_name, f"{col_letter}1:{col_letter}1", session_id, width_pt
+            )
+    finally:
+        graph_close_workbook_session(graph_token, item_id, session_id)
 
 
 def run_summary(dry_run: bool = False, force_login: bool = False) -> int:
@@ -325,9 +474,9 @@ def run_summary(dry_run: bool = False, force_login: bool = False) -> int:
             force_login=force_login,
         )
         header_values = fetch_main_header_row(graph_token, config)
-        content = build_summary_xlsx_bytes(ship_rows, header_values, today, window_end, config)
+        layout = build_summary_layout(ship_rows, header_values, today, window_end, config)
         remote_path = config.get("shipping_summary_path", DEFAULT_OUTPUT_PATH)
-        upload_onedrive_excel(graph_token, remote_path, content)
+        write_summary_via_graph(graph_token, remote_path, layout)
         logging.info("出荷日サマリーを更新しました: %s (%d件)", remote_path, len(ship_rows))
         return 0
     except Exception as exc:
