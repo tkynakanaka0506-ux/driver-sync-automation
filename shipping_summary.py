@@ -30,6 +30,7 @@ from driver_sync import (
     col_letter_from_index,
     download_share_file,
     extract_rows_from_workbook,
+    graph_batch_patch_fills,
     graph_batch_set_row_heights,
     graph_close_workbook_session,
     graph_create_workbook_session,
@@ -38,7 +39,6 @@ from driver_sync import (
     graph_patch_range_values,
     graph_read_range_values,
     graph_request_with_retry,
-    graph_resize_table,
     graph_resolve_worksheet_name,
     load_config,
     prepare_rows_for_output,
@@ -101,19 +101,15 @@ def md_to_date(md_str: str, today: date) -> date | None:
     return min(candidates, key=lambda d: abs((d - today).days))
 
 
-def collect_all_rows(config: dict[str, Any], today: date) -> list[dict[str, Any]]:
-    """4社の元データから抽出する。着日フィルタは出荷日サマリーには使わないため、
-    着日範囲を十分広く取り、出荷日側で別途フィルタする。
+def collect_all_rows(config: dict[str, Any], today: date, window_end: date) -> list[dict[str, Any]]:
+    """4社の元データから抽出する。着日でなく出荷日基準で抽出範囲を判定する
+    （window_date_field="ship"）。
 
     require_driver_info=False: 横持ち（中継）案件などドライバー4項目が未確定の行も
     営業用Excelとは異なり除外しない（出荷日の有無だけが知りたいため）。
     """
     header_rows = int(config.get("header_rows", 4))
     auto_detect_columns = bool(config.get("auto_detect_columns", False))
-    # is_arr_in_sync_window の着日上限は通常 today+2日程度に固定されているため、
-    # arr_days_back（下限のみ）だけでは長距離輸送などの着日が先の案件が弾かれる。
-    # 出荷日サマリーは着日でなく出荷日側で絞るので、上限も十分先まで広げる。
-    arr_window_end_override = today + timedelta(days=60)
 
     all_rows: list[dict[str, Any]] = []
     for source in config["sources"]:
@@ -129,8 +125,9 @@ def collect_all_rows(config: dict[str, Any], today: date) -> list[dict[str, Any]
             today,
             arr_days_back=400,
             auto_detect_columns=auto_detect_columns,
-            arr_window_end_override=arr_window_end_override,
+            arr_window_end_override=window_end,
             require_driver_info=False,
+            window_date_field="ship",
         )
         workbook.close()
         logging.info("抽出件数: %s = %d", key, len(rows))
@@ -177,6 +174,10 @@ HEADER_ROW_HEIGHT = 24.0
 MAIN_COLUMN_WIDTH_PT = {"A": 113.25, "B": 264.0, "C": 74.25, "D": 78.0, "E": 119.25, "F": 355.5, "G": 126.75}
 # Excel組み込みテーブルスタイル「赤、テーブルスタイル（中間）17」の内部名
 TABLE_STYLE_NAME = "TableStyleMedium17"
+# 出荷日ごとの区切り見出し行（黒背景・白文字・結合セル）
+DATE_HEADER_FILL_HEX = "#000000"
+DATE_HEADER_ROW_HEIGHT = 24.0
+SPACER_ROW_HEIGHT = 8.0
 
 
 def graph_range_format_url(item_id: str, sheet_name: str, address: str) -> str:
@@ -188,6 +189,19 @@ def graph_unmerge_range(graph_token: str, item_id: str, sheet_name: str, address
     seg = worksheet_segment(sheet_name)
     url = f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/{seg}/range(address='{address}')/unmerge"
     graph_request_with_retry("POST", url, graph_token, session_id=session_id)
+
+
+def graph_merge_range(graph_token: str, item_id: str, sheet_name: str, address: str, session_id: str) -> None:
+    seg = worksheet_segment(sheet_name)
+    url = f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/{seg}/range(address='{address}')/merge"
+    graph_request_with_retry("POST", url, graph_token, session_id=session_id, json={"across": False})
+
+
+def graph_delete_table(graph_token: str, item_id: str, table_name: str, session_id: str) -> None:
+    url = f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/tables('{table_name}')"
+    res = graph_request_with_retry("DELETE", url, graph_token, session_id=session_id)
+    if not res.ok and res.status_code != 404:
+        raise RuntimeError(f"テーブル削除失敗: {res.status_code} {res.text[:300]}")
 
 
 def graph_clear_range(
@@ -293,21 +307,43 @@ def fetch_main_header_row(graph_token: str, config: dict[str, Any]) -> list[str]
     return header_values
 
 
+def group_rows_by_date(
+    rows: list[dict[str, Any]], today: date, window_end: date
+) -> list[tuple[date, list[dict[str, Any]]]]:
+    """表示範囲内の全日付（0件の日も含む）について、出荷日昇順でグループ化する。"""
+    by_date: dict[date, list[dict[str, Any]]] = {}
+    for row in rows:
+        by_date.setdefault(row["_出荷日付"], []).append(row)
+
+    groups: list[tuple[date, list[dict[str, Any]]]] = []
+    d = today
+    while d <= window_end:
+        groups.append((d, by_date.get(d, [])))
+        d += timedelta(days=1)
+    return groups
+
+
 def build_summary_layout(
     rows: list[dict[str, Any]],
     header_values: list[str],
     today: date,
     window_end: date,
 ) -> dict[str, Any]:
-    """営業用Excelと同じA〜G列構成で、書き込む値・行高さを組み立てる（出荷日昇順のフラットな一覧）。
+    """営業用Excelと同じA〜G列構成で、出荷日ごとに区切り見出し（黒背景・白文字・結合）を
+    挟みつつ書き込む値・行高さ・結合範囲・塗り色・テーブル範囲を組み立てる。
 
-    色付けはExcelの本テーブル機能（テーブルスタイル）に任せるため、ここでは塗り色は作らない。
+    各出荷日グループは1つの独立したExcelテーブル（テーブルスタイル中間17）として扱う。
+    Tableは結合セルを含められないため、区切り見出し行・空白行はテーブル範囲の外に置く。
     """
     case_max = len(SUMMARY_OUTPUT_COLUMNS)
     last_col_letter = col_letter_from_index(case_max)
 
     matrix: list[list[Any]] = []
     row_heights: list[tuple[int, float]] = []
+    merge_addresses: list[str] = []
+    date_header_fill_rows: list[int] = []
+    date_header_font_rows: list[int] = []
+    table_specs: list[tuple[int, int]] = []
 
     matrix.append(
         [
@@ -322,20 +358,48 @@ def build_summary_layout(
     for _ in range(2, HEADER_ROW):
         matrix.append([""] * case_max)
 
-    matrix.append((header_values[:case_max] + [""] * case_max)[:case_max])
-    row_heights.append((HEADER_ROW, HEADER_ROW_HEIGHT))
-
-    row_num = HEADER_ROW
-    for row in rows:
+    row_num = HEADER_ROW - 1
+    groups = group_rows_by_date(rows, today, window_end)
+    for d, day_rows in groups:
+        # 空白の区切り行
         row_num += 1
-        matrix.append([cell_output_value(row, name) for name in SUMMARY_OUTPUT_COLUMNS])
-        row_heights.append((row_num, MAIN_ROW_HEIGHT))
+        matrix.append([""] * case_max)
+        row_heights.append((row_num, SPACER_ROW_HEIGHT))
+
+        # 結合・黒背景白文字の日付見出し行
+        row_num += 1
+        date_header_row = row_num
+        matrix.append([f"{format_date_label(d)} 出荷数：{len(day_rows)}件"] + [""] * (case_max - 1))
+        row_heights.append((date_header_row, DATE_HEADER_ROW_HEIGHT))
+        merge_addresses.append(f"A{date_header_row}:{last_col_letter}{date_header_row}")
+        date_header_fill_rows.append(date_header_row)
+        date_header_font_rows.append(date_header_row)
+
+        if not day_rows:
+            continue
+
+        # 列見出し行
+        row_num += 1
+        header_row_num = row_num
+        matrix.append((header_values[:case_max] + [""] * case_max)[:case_max])
+        row_heights.append((header_row_num, HEADER_ROW_HEIGHT))
+
+        for row in day_rows:
+            row_num += 1
+            matrix.append([cell_output_value(row, name) for name in SUMMARY_OUTPUT_COLUMNS])
+            row_heights.append((row_num, MAIN_ROW_HEIGHT))
+
+        table_specs.append((header_row_num, row_num))
 
     return {
         "matrix": matrix,
         "row_heights": row_heights,
         "last_row": row_num,
         "last_col_letter": last_col_letter,
+        "merge_addresses": merge_addresses,
+        "date_header_fill_rows": date_header_fill_rows,
+        "date_header_font_rows": date_header_font_rows,
+        "table_specs": table_specs,
     }
 
 
@@ -361,6 +425,13 @@ def write_summary_via_graph(
         last_row = layout["last_row"]
         last_col_letter = layout["last_col_letter"]
         data_address = f"A1:{last_col_letter}{last_row}"
+
+        # 出荷日ごとのテーブルは行数が変わるたびに範囲が変わるため、毎回削除して作り直す
+        # （= このテーブルに手動で設定した罫線・書式は実行ごとにリセットされる点に注意）。
+        existing_tables = graph_list_tables_on_sheet(graph_token, item_id, sheet_name, session_id)
+        for tbl in existing_tables:
+            graph_delete_table(graph_token, item_id, str(tbl["name"]), session_id)
+
         graph_patch_range_values(graph_token, item_id, sheet_name, data_address, layout["matrix"], session_id)
 
         graph_set_range_alignment(
@@ -375,15 +446,24 @@ def write_summary_via_graph(
             graph_token, item_id, sheet_name, f"A1:{last_col_letter}1", session_id, bold=True,
         )
 
+        for address in layout["merge_addresses"]:
+            graph_merge_range(graph_token, item_id, sheet_name, address, session_id)
+
+        fills = [
+            (f"A{r}:{last_col_letter}{r}", DATE_HEADER_FILL_HEX) for r in layout["date_header_fill_rows"]
+        ]
+        graph_batch_patch_fills(graph_token, item_id, sheet_name, fills, session_id)
+
+        for r in layout["date_header_font_rows"]:
+            graph_set_range_font(
+                graph_token, item_id, sheet_name, f"A{r}:{last_col_letter}{r}", session_id,
+                color="#FFFFFF", bold=True,
+            )
+
         graph_batch_set_row_heights(graph_token, item_id, sheet_name, layout["row_heights"], session_id)
 
-        # 既存テーブルがあればリサイズのみ（削除→再作成だと罫線などの手動編集が消える）。
-        # スタイルは初回作成時だけ設定し、以降は触らない。
-        table_address = f"A{HEADER_ROW}:{last_col_letter}{last_row}"
-        existing_tables = graph_list_tables_on_sheet(graph_token, item_id, sheet_name, session_id)
-        if existing_tables:
-            graph_resize_table(graph_token, item_id, str(existing_tables[0]["name"]), table_address, session_id)
-        else:
+        for header_row_num, group_last_row in layout["table_specs"]:
+            table_address = f"A{header_row_num}:{last_col_letter}{group_last_row}"
             table_name = graph_create_table(graph_token, item_id, sheet_name, table_address, session_id)
             graph_set_table_style(graph_token, item_id, table_name, session_id, TABLE_STYLE_NAME)
 
@@ -415,7 +495,7 @@ def run_summary(dry_run: bool = False, force_login: bool = False) -> int:
             window_end,
         )
 
-        all_rows = collect_all_rows(config, today)
+        all_rows = collect_all_rows(config, today, window_end)
         ship_rows = filter_rows_by_ship_window(all_rows, today, window_end)
         ship_rows = sort_rows_by_ship_date(ship_rows)
 

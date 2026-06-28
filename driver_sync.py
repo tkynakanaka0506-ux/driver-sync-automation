@@ -767,13 +767,15 @@ def append_records_from_physical_row(
     results: list[dict[str, Any]],
     require_driver_info: bool = True,
     arr_window_end_override: date | None = None,
+    window_date_field: str = "arr",
 ) -> None:
     """1 Excel 行を軸に、指定列から案件情報とドライバー情報をセットで抽出。
 
     require_driver_info=False の場合、ドライバー4項目が未入力（横持ち等で
     まだ手配が確定していない）の行も除外せず出力する（出荷日サマリー用）。
-    arr_window_end_override で着日上限を広げられる（出荷日サマリーは着日でなく
-    出荷日側で絞るため、着日フィルタの上限に引っかからないよう広げて使う）。
+    window_date_field="ship" にすると、範囲判定を着日でなく出荷日基準にする
+    （出荷日サマリー用。"arr"のままなら従来どおり着日基準）。
+    arr_window_end_override で上限日を広げられる。
     """
     if not has_case_on_row(row_tuple, effective_map):
         return
@@ -782,9 +784,9 @@ def append_records_from_physical_row(
     if not an_no_lines:
         return
 
-    arr_date = to_date(cell(row_tuple, effective_map["arr"]), today)
-    if not arr_date or not is_arr_in_sync_window(
-        arr_date, today, arr_days_back, window_end_override=arr_window_end_override
+    window_date = to_date(cell(row_tuple, effective_map[window_date_field]), today)
+    if not window_date or not is_arr_in_sync_window(
+        window_date, today, arr_days_back, window_end_override=arr_window_end_override
     ):
         return
 
@@ -1106,6 +1108,7 @@ def extract_rows_from_workbook(
     auto_detect_columns: bool = False,
     require_driver_info: bool = True,
     arr_window_end_override: date | None = None,
+    window_date_field: str = "arr",
 ) -> list[dict[str, Any]]:
     maps = SHEET_CONFIG.get(config_key, [])
     results: list[dict[str, Any]] = []
@@ -1200,6 +1203,7 @@ def extract_rows_from_workbook(
                 results=results,
                 require_driver_info=require_driver_info,
                 arr_window_end_override=arr_window_end_override,
+                window_date_field=window_date_field,
             )
             if len(results) <= before:
                 continue
