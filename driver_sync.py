@@ -45,15 +45,14 @@ PROTECTED_HIDDEN_COLUMN_NAMES = ("携帯番号秘",)  # 非表示+シート保�
 MASKED_COLUMN_NAMES = ("携帯番号",)  # 見える列だが値は***でマスクする
 MASK_TEXT = "***"
 MASKED_COLUMN_WIDTH = 180.0  # 携帯番号列の通常表示幅
-PASSWORD_INPUT_CELL = "T1"  # ここにパスワードを入力する
-PASSWORD_INPUT_COLUMN_LETTER = "T"
-PASSWORD_LABEL_CELL = "S1"
+PASSWORD_INPUT_CELL = "B2"  # ここにパスワードを入力する
+PASSWORD_INPUT_CELL_ABS = "$B$2"
+PASSWORD_LABEL_CELL = "A2"
 PASSWORD_STORAGE_CELL = "O2"  # 合言葉の正解を保存（K/L列1行目はG1:L1のマージセルで書込不可だったため別セルに変更）
 PASSWORD_STORAGE_CELL_ABS = "$O$2"
-TARGET_CASE_LABEL_CELL = "S2"
-TARGET_CASE_INPUT_CELL = "T2"  # ここに案件Noを入力すると、その行だけ携帯番号が見える
-TARGET_CASE_INPUT_CELL_ABS = "$T$2"
-PASSWORD_UI_COLUMN_WIDTHS = {"S": 110.0, "T": 110.0}  # ラベル・入力欄が見切れないよう幅を広げる
+TARGET_CASE_LABEL_CELL = "A3"
+TARGET_CASE_INPUT_CELL = "B3"  # ここに案件Noを入力すると、その行だけ携帯番号が見える
+TARGET_CASE_INPUT_CELL_ABS = "$B$3"
 LOG_PATH = SCRIPT_DIR / "driver_sync.log"
 TASK_LOG_PATH = SCRIPT_DIR / "driver_sync_task.log"
 STATUS_PATH = SCRIPT_DIR / "driver_sync_status.json"
@@ -1784,7 +1783,7 @@ def cell_output_value(
             # パスワードが合っていて、かつ確認したい案件No欄がこの行の案件Noと
             # 一致した時だけ、その行の本物の番号を表示する（他の行は***のまま）。
             return (
-                f"=IF(AND(${PASSWORD_INPUT_COLUMN_LETTER}$1={PASSWORD_STORAGE_CELL_ABS},"
+                f"=IF(AND({PASSWORD_INPUT_CELL_ABS}={PASSWORD_STORAGE_CELL_ABS},"
                 f"{TARGET_CASE_INPUT_CELL_ABS}={case_col_letter}{excel_row}),"
                 f"{hidden_col_letter}{excel_row},\"{MASK_TEXT}\")"
             )
@@ -2784,10 +2783,6 @@ def update_onedrive_values_only(
             graph_set_column_width(
                 graph_token, item_id, ws_name, "O", 0, session_id,
             )
-            for ui_col_letter, ui_width in PASSWORD_UI_COLUMN_WIDTHS.items():
-                graph_set_column_width(
-                    graph_token, item_id, ws_name, ui_col_letter, ui_width, session_id,
-                )
             apply_phone_column_protection_scope(
                 graph_token, item_id, ws_name, col_map, session_id
             )
