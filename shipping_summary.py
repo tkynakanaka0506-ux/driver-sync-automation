@@ -110,6 +110,10 @@ def collect_all_rows(config: dict[str, Any], today: date) -> list[dict[str, Any]
     """
     header_rows = int(config.get("header_rows", 4))
     auto_detect_columns = bool(config.get("auto_detect_columns", False))
+    # is_arr_in_sync_window の着日上限は通常 today+2日程度に固定されているため、
+    # arr_days_back（下限のみ）だけでは長距離輸送などの着日が先の案件が弾かれる。
+    # 出荷日サマリーは着日でなく出荷日側で絞るので、上限も十分先まで広げる。
+    arr_window_end_override = today + timedelta(days=60)
 
     all_rows: list[dict[str, Any]] = []
     for source in config["sources"]:
@@ -125,6 +129,7 @@ def collect_all_rows(config: dict[str, Any], today: date) -> list[dict[str, Any]
             today,
             arr_days_back=400,
             auto_detect_columns=auto_detect_columns,
+            arr_window_end_override=arr_window_end_override,
             require_driver_info=False,
         )
         workbook.close()
