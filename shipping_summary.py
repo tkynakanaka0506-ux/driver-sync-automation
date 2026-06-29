@@ -240,9 +240,13 @@ def collect_all_rows(config: dict[str, Any], today: date, window_end: date) -> l
         # 福岡ロジテックのF列(納入先住所)に「御社積み」がある行は、外部倉庫から現場へ
         # 出庫する分（宇美工場からの出荷ではない）なので出荷日サマリーでは除外する
         # （要望により出荷日サマリーのみ。営業用Excel側は対象のまま）
-        row_exclude_predicate = (
-            (lambda row_tuple: "御社積み" in cell(row_tuple, "F")) if key == "fukuoka" else None
-        )
+        # 松崎運輸のG列(納入先住所)に「司鳥栖倉庫積込み」がある行も同様に除外する
+        if key == "fukuoka":
+            row_exclude_predicate = lambda row_tuple: "御社積み" in cell(row_tuple, "F")
+        elif key == "matsuzaki":
+            row_exclude_predicate = lambda row_tuple: "司鳥栖倉庫積込み" in cell(row_tuple, "G")
+        else:
+            row_exclude_predicate = None
         rows = extract_rows_from_workbook(
             workbook,
             key,
