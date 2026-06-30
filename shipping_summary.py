@@ -65,7 +65,7 @@ WEEKDAY_LABELS = ("月", "火", "水", "木", "金", "土", "日")
 # 未設定でも動くようにデフォルト値を持つ。
 DEFAULT_OUTPUT_PATH = "/ドライバー情報/出荷日別案件サマリー.xlsx"
 DEFAULT_SHEET_NAME = "出荷日サマリー"
-DEFAULT_DAYS_AHEAD = 3
+DEFAULT_DAYS_AHEAD = 6
 
 # A列:案件No、B列:納入先住所（新規）、C列以降は営業用Excelと同じ構成、I列:抽出元
 SUMMARY_OUTPUT_COLUMNS = ["案件No", "納入先住所", "案件名", "出荷日", "着日", "備考", "型式", "車型", "依頼先名"]
