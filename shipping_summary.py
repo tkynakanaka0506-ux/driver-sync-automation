@@ -67,8 +67,8 @@ DEFAULT_OUTPUT_PATH = "/ドライバー情報/出荷日別案件サマリー.xls
 DEFAULT_SHEET_NAME = "出荷日サマリー"
 DEFAULT_DAYS_AHEAD = 3
 
-# A列:案件No、B列:納入先住所（新規）、C列以降は営業用Excelと同じ構成
-SUMMARY_OUTPUT_COLUMNS = ["案件No", "納入先住所", "案件名", "出荷日", "着日", "備考", "型式", "車型"]
+# A列:案件No、B列:納入先住所（新規）、C列以降は営業用Excelと同じ構成、I列:抽出元
+SUMMARY_OUTPUT_COLUMNS = ["案件No", "納入先住所", "案件名", "出荷日", "着日", "備考", "型式", "車型", "依頼先名"]
 HEADER_ROW = 6
 
 # KSサポート（出荷日サマリー専用の追加抽出元。営業用Excel側の4社とは別枠・別構造のため
@@ -130,6 +130,7 @@ def extract_ks_rows(workbook: openpyxl.Workbook, today: date) -> list[dict[str, 
                 "型式": remark2,
                 "車型": "",
                 "依頼先": KS_SOURCE_KEY,
+                "依頼先名": "KS",
                 "行キー": f"{KS_SOURCE_KEY}|{KS_SHEET_NAME}|{r}",
             }
         )
@@ -195,6 +196,7 @@ def extract_parts_rows(workbook: openpyxl.Workbook, today: date) -> list[dict[st
                 "型式": remark2,
                 "車型": "",
                 "依頼先": PARTS_SOURCE_KEY,
+                "依頼先名": "パーツ➔発送",
                 "行キー": f"{PARTS_SOURCE_KEY}|{PARTS_SHEET_NAME}|{r}",
             }
         )
@@ -238,6 +240,16 @@ def md_to_date(md_str: str, today: date) -> date | None:
     return min(candidates, key=lambda d: abs((d - today).days))
 
 
+# 依頼先キーから表示名へのマッピング（I列に表示する抽出元名）
+SUMMARY_SOURCE_NAMES: dict[str, str] = {
+    "matsuzaki": "松崎運輸",
+    "nakadori": "中通",
+    "fukuoka": "福岡ロジテック",
+    "maruun": "丸運",
+    KS_SOURCE_KEY: "KS",
+    PARTS_SOURCE_KEY: "パーツ➔発送",
+}
+
 # 各依頼先の元データにおける納入先住所の列番号（1始まり）
 # matsuzaki のみ G列(7)、その他は F列(6)
 SOURCE_ADDRESS_COL: dict[str, int] = {
@@ -277,8 +289,15 @@ def collect_all_rows(config: dict[str, Any], today: date, window_end: date) -> l
         logging.info("取得中: %s", key)
         content = download_share_file(share_url)
         workbook = openpyxl.load_workbook(BytesIO(content), read_only=False, data_only=True)
-        # 出荷日サマリーでは滋賀管理シート分は対象外（要望により除外。営業用Excel側は対象のまま）
-        excluded_sheet_keywords = ("滋賀", "管理") if key == "nakadori" else ()
+        # 出荷日サマリーでは下記シートは対象外（要望により除外。営業用Excel側は対象のまま）
+        # - 中通の滋賀管理シート
+        # - 福岡ロジテックの倉庫管理シート
+        if key == "nakadori":
+            excluded_sheet_keywords = ("滋賀", "管理")
+        elif key == "fukuoka":
+            excluded_sheet_keywords = ("倉庫管理",)
+        else:
+            excluded_sheet_keywords = ()
         # 福岡ロジテックのF列(納入先住所)に「御社積み」がある行は、外部倉庫から現場へ
         # 出庫する分（宇美工場からの出荷ではない）なので出荷日サマリーでは除外する
         # （要望により出荷日サマリーのみ。営業用Excel側は対象のまま）
@@ -325,6 +344,7 @@ def collect_all_rows(config: dict[str, Any], today: date, window_end: date) -> l
                     row["納入先住所"] = ""
             else:
                 row["納入先住所"] = ""
+            row["依頼先名"] = SUMMARY_SOURCE_NAMES.get(key, key)
             valid_rows.append(row)
         rows = valid_rows
         workbook.close()
@@ -411,13 +431,14 @@ HEADER_ROW_HEIGHT = 24.0
 # 列幅(pt)を実書式から取得（Graph APIのcolumnWidthはptそのまま使える）
 MAIN_COLUMN_WIDTH_PT = {
     "A": 113.25,  # 案件No
-    "B": 355.5,   # 納入先住所（新規）
-    "C": 264.0,   # 案件名（旧B）
-    "D": 74.25,   # 出荷日（旧C）
-    "E": 78.0,    # 着日（旧D）
-    "F": 119.25,  # 備考①（旧E）
-    "G": 355.5,   # 備考②（旧F）
-    "H": 126.75,  # 車型（旧G）
+    "B": 355.5,   # 納入先住所
+    "C": 264.0,   # 案件名
+    "D": 74.25,   # 出荷日
+    "E": 78.0,    # 着日
+    "F": 119.25,  # 備考①
+    "G": 355.5,   # 備考②
+    "H": 126.75,  # 車型
+    "I": 126.75,  # 抽出元
 }
 # Excel組み込みテーブルスタイル「赤、テーブルスタイル（中間）17」の内部名
 TABLE_STYLE_NAME = "TableStyleMedium17"
@@ -578,8 +599,8 @@ def fetch_main_header_row(graph_token: str, config: dict[str, Any]) -> list[str]
     else:
         # フォールバック: SUMMARY_OUTPUT_COLUMNS から納入先住所以外を使用
         orig = [c for c in SUMMARY_OUTPUT_COLUMNS if c != "納入先住所"]
-    # 営業用ExcelはA〜G列（7列）なので、B位置に「納入先住所」を挿入して8列にする
-    header_values = [orig[0], "納入先住所"] + orig[1:]
+    # 営業用ExcelはA〜G列（7列）なので、B位置に「納入先住所」を挿入し末尾に「抽出元」を付加して9列にする
+    header_values = [orig[0], "納入先住所"] + orig[1:] + ["抽出元"]
     for col_index, label in HEADER_LABEL_OVERRIDES.items():
         if col_index < len(header_values):
             header_values[col_index] = label
@@ -676,7 +697,7 @@ def build_summary_layout(
     }
 
 
-CLEAR_RANGE = "A1:H500"
+CLEAR_RANGE = "A1:I500"
 
 
 def write_summary_via_graph(
