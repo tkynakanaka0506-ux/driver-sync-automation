@@ -100,6 +100,7 @@ def extract_ks_rows(workbook: openpyxl.Workbook, today: date) -> list[dict[str, 
     製品種別(I列)は備考②（出力上は「型式」キー）に、車型は固定で「KS」と表示する。
     """
     ws = workbook[KS_SHEET_NAME]
+    fiscal_year_start = date(today.year if today.month >= 4 else today.year - 1, 4, 1)
     rows: list[dict[str, Any]] = []
     for r in range(KS_HEADER_ROWS + 1, ws.max_row + 1):
         status = str(ws.cell(row=r, column=KS_STATUS_COL).value or "").strip()
@@ -108,6 +109,12 @@ def extract_ks_rows(workbook: openpyxl.Workbook, today: date) -> list[dict[str, 
         an_no = str(ws.cell(row=r, column=KS_AN_NO_COL).value or "").strip()
         case_name = str(ws.cell(row=r, column=KS_CASE_NAME_COL).value or "").strip()
         if not an_no and not case_name:
+            continue
+        # 今年度より前の行はスキップ
+        ship_val = ws.cell(row=r, column=KS_SHIP_COL).value
+        if isinstance(ship_val, datetime):
+            ship_val = ship_val.date()
+        if isinstance(ship_val, date) and ship_val < fiscal_year_start:
             continue
         product_type = str(ws.cell(row=r, column=KS_PRODUCT_TYPE_COL).value or "").strip()
         remark2 = f"{product_type} / {KS_CAR_TYPE_LABEL}" if product_type else KS_CAR_TYPE_LABEL
@@ -158,6 +165,7 @@ def extract_parts_rows(workbook: openpyxl.Workbook, today: date) -> list[dict[st
     M列(運送業者)を車型に反映する（KSサポートと違い固定値ではなく実際の業者名）。
     """
     ws = workbook[PARTS_SHEET_NAME]
+    fiscal_year_start = date(today.year if today.month >= 4 else today.year - 1, 4, 1)
     rows: list[dict[str, Any]] = []
     for r in range(PARTS_HEADER_ROWS + 1, ws.max_row + 1):
         status = str(ws.cell(row=r, column=PARTS_STATUS_COL).value or "").strip()
@@ -166,6 +174,12 @@ def extract_parts_rows(workbook: openpyxl.Workbook, today: date) -> list[dict[st
         an_no = str(ws.cell(row=r, column=PARTS_AN_NO_COL).value or "").strip()
         case_name = str(ws.cell(row=r, column=PARTS_CASE_NAME_COL).value or "").strip()
         if not an_no and not case_name:
+            continue
+        # 今年度より前の行はスキップ
+        ship_val = ws.cell(row=r, column=PARTS_SHIP_COL).value
+        if isinstance(ship_val, datetime):
+            ship_val = ship_val.date()
+        if isinstance(ship_val, date) and ship_val < fiscal_year_start:
             continue
         carrier = str(ws.cell(row=r, column=PARTS_CARRIER_COL).value or "").strip()
         remark2 = f"{PARTS_LABEL} / {carrier}" if carrier else PARTS_LABEL
@@ -233,6 +247,15 @@ SOURCE_ADDRESS_COL: dict[str, int] = {
     "maruun": 6,
 }
 
+# 各依頼先の元データにおける出荷日の列番号（1始まり）。SHEET_CONFIG の ship フィールドと対応。
+# 実際の日付オブジェクトを読み返して今年度フィルターに使う。
+SOURCE_SHIP_COL: dict[str, int] = {
+    "matsuzaki": 4,   # D列
+    "fukuoka": 3,     # C列
+    "nakadori": 3,    # C列
+    "maruun": 5,      # E列
+}
+
 
 def collect_all_rows(config: dict[str, Any], today: date, window_end: date) -> list[dict[str, Any]]:
     """4社の元データから抽出する。着日でなく出荷日基準で抽出範囲を判定する
@@ -243,6 +266,9 @@ def collect_all_rows(config: dict[str, Any], today: date, window_end: date) -> l
     """
     header_rows = int(config.get("header_rows", 4))
     auto_detect_columns = bool(config.get("auto_detect_columns", False))
+
+    # 今年度（4月1日〜翌年3月31日）の開始日
+    fiscal_year_start = date(today.year if today.month >= 4 else today.year - 1, 4, 1)
 
     all_rows: list[dict[str, Any]] = []
     for source in config["sources"]:
@@ -276,18 +302,31 @@ def collect_all_rows(config: dict[str, Any], today: date, window_end: date) -> l
             excluded_sheet_keywords=excluded_sheet_keywords,
             row_exclude_predicate=row_exclude_predicate,
         )
-        # 行キーからシート名・行番号を逆引きして納入先住所列を付加する
+        # 行キーからシート名・行番号を逆引きして納入先住所を付加し、
+        # 今年度（fiscal_year_start 以降）の行だけを残す。
+        # to_md() が年情報を失うため md_to_date() が古い日付を今年の同日と誤認識する問題を
+        # ここで実際のセル値（date オブジェクト）を確認することで解決する。
         addr_col = SOURCE_ADDRESS_COL.get(key, 6)
+        ship_col = SOURCE_SHIP_COL.get(key, 3)
+        valid_rows: list[dict[str, Any]] = []
         for row in rows:
             row_key_parts = row.get("行キー", "").split("|")
             if len(row_key_parts) >= 3:
                 try:
-                    ws_addr = workbook[row_key_parts[1]]
-                    row["納入先住所"] = str(ws_addr.cell(row=int(row_key_parts[2]), column=addr_col).value or "").strip()
+                    ws_ref = workbook[row_key_parts[1]]
+                    rnum = int(row_key_parts[2])
+                    row["納入先住所"] = str(ws_ref.cell(row=rnum, column=addr_col).value or "").strip()
+                    ship_val = ws_ref.cell(row=rnum, column=ship_col).value
+                    if isinstance(ship_val, datetime):
+                        ship_val = ship_val.date()
+                    if isinstance(ship_val, date) and ship_val < fiscal_year_start:
+                        continue  # 今年度より前の行はスキップ
                 except Exception:
                     row["納入先住所"] = ""
             else:
                 row["納入先住所"] = ""
+            valid_rows.append(row)
+        rows = valid_rows
         workbook.close()
         logging.info("抽出件数: %s = %d", key, len(rows))
         all_rows.extend(rows)
