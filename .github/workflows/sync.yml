@@ -37,6 +37,11 @@ jobs:
           DRIVER_SYNC_SHEET_PASSWORD: ${{ secrets.SHEET_PASSWORD }}
         run: python driver_sync.py
 
+      - name: Normalize pasted rows in 案件管理シート
+        env:
+          DRIVER_SYNC_UNATTENDED: "1"
+        run: python normalize_paste.py
+
       - name: Persist refreshed token cache back to secret
         if: always()
         env:
