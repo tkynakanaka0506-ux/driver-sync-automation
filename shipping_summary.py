@@ -285,6 +285,8 @@ def collect_all_rows(config: dict[str, Any], today: date, window_end: date) -> l
     all_rows: list[dict[str, Any]] = []
     for source in config["sources"]:
         key = source["key"]
+        if key == "maruun":
+            continue  # 丸運は出荷日サマリーの対象外
         share_url = source["share_url"]
         logging.info("取得中: %s", key)
         content = download_share_file(share_url)
