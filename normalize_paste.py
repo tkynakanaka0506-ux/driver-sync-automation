@@ -29,7 +29,26 @@ from __future__ import annotations
 import base64
 import json
 import sys
+from datetime import datetime, timedelta
 from pathlib import Path
+
+EXCEL_BASE = datetime(1899, 12, 30)
+
+
+def serial_to_date_str(val) -> str:
+    """Excelの日付シリアル値 → "YYYY/MM/DD" 文字列。日付以外はそのまま返す。"""
+    if isinstance(val, (int, float)) and val > 1:
+        return (EXCEL_BASE + timedelta(days=int(val))).strftime("%Y/%m/%d")
+    return val
+
+
+def time_serial_to_str(val) -> str:
+    """Excelの時刻シリアル値（0.375 = 9:00）→ "H:MM" 文字列。"""
+    if isinstance(val, float) and 0 <= val < 1:
+        total_minutes = round(val * 24 * 60)
+        h, m = divmod(total_minutes, 60)
+        return f"{h}:{m:02d}"
+    return val
 
 import msal
 import requests
@@ -94,10 +113,10 @@ def remap(src: list) -> list:
         CHECK_MARK if get(0) is True else ("" if get(0) is False else get(0)),  # A: 納期
         get(1),   # B: 案件No.
         get(2),   # C: 納入先名
-        get(4),   # D: 型式 (src[3]は空白なので飛ばす)
-        get(5),   # E: 出荷日
-        get(6),   # F: 着日
-        get(11),  # G: 時間
+        get(4),                       # D: 型式 (src[3]は空白なので飛ばす)
+        serial_to_date_str(get(5)),   # E: 出荷日（シリアル→日付文字列）
+        serial_to_date_str(get(6)),   # F: 着日（シリアル→日付文字列）
+        time_serial_to_str(get(11)),  # G: 時間（時刻シリアル→文字列）
         get(12),  # H: 指定車両
         get(13),  # I: 住所
     ]
