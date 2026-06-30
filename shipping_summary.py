@@ -426,7 +426,7 @@ DATE_HEADER_FILL_HEX = "#000000"
 DATE_HEADER_ROW_HEIGHT = 24.0
 # 横持ち等の強調行は営業用Excel側の薄い青ではなく、サマリーでは少し濃めの灰色で区別する。
 # それ以外の通常案件は薄い灰色で統一する（テーブルスタイルの交互配色を上書きする）。
-HIGHLIGHT_CASE_FILL_HEX = "#E6E6E6"
+HIGHLIGHT_CASE_FILL_HEX = "#DEDEDE"
 DEFAULT_DATA_ROW_FILL_HEX = "#F7F7F7"
 # KSサポート分は出荷元が異なるため薄い赤色で区別する
 KS_ROW_FILL_HEX = "#FFE3E6"
