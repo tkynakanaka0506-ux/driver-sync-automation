@@ -67,8 +67,8 @@ DEFAULT_OUTPUT_PATH = "/ドライバー情報/出荷日別案件サマリー.xls
 DEFAULT_SHEET_NAME = "出荷日サマリー"
 DEFAULT_DAYS_AHEAD = 3
 
-# 営業用Excelと同じ列構成（A〜G）をそのまま使う
-SUMMARY_OUTPUT_COLUMNS = ["案件No", "案件名", "出荷日", "着日", "備考", "型式", "車型"]
+# A列:案件No、B列:納入先住所（新規）、C列以降は営業用Excelと同じ構成
+SUMMARY_OUTPUT_COLUMNS = ["案件No", "納入先住所", "案件名", "出荷日", "着日", "備考", "型式", "車型"]
 HEADER_ROW = 6
 
 # KSサポート（出荷日サマリー専用の追加抽出元。営業用Excel側の4社とは別枠・別構造のため
@@ -87,6 +87,7 @@ KS_STATUS_COL = 1
 KS_AN_NO_COL = 2
 KS_SHIP_COL = 3
 KS_ARR_COL = 4
+KS_ADDRESS_COL = 6
 KS_CASE_NAME_COL = 7
 KS_PRODUCT_TYPE_COL = 9
 KS_ACCEPT_STATUS = "配車確定"
@@ -110,9 +111,11 @@ def extract_ks_rows(workbook: openpyxl.Workbook, today: date) -> list[dict[str, 
             continue
         product_type = str(ws.cell(row=r, column=KS_PRODUCT_TYPE_COL).value or "").strip()
         remark2 = f"{product_type} / {KS_CAR_TYPE_LABEL}" if product_type else KS_CAR_TYPE_LABEL
+        address = str(ws.cell(row=r, column=KS_ADDRESS_COL).value or "").strip()
         rows.append(
             {
                 "案件No": an_no,
+                "納入先住所": address,
                 "案件名": case_name,
                 "出荷日": to_md(ws.cell(row=r, column=KS_SHIP_COL).value, today),
                 "着日": to_md(ws.cell(row=r, column=KS_ARR_COL).value, today),
@@ -142,6 +145,7 @@ PARTS_STATUS_COL = 1
 PARTS_AN_NO_COL = 2
 PARTS_SHIP_COL = 3
 PARTS_ARR_COL = 4
+PARTS_ADDRESS_COL = 6
 PARTS_CASE_NAME_COL = 7
 PARTS_CARRIER_COL = 13
 PARTS_ACCEPT_STATUS = "配車確定"
@@ -165,9 +169,11 @@ def extract_parts_rows(workbook: openpyxl.Workbook, today: date) -> list[dict[st
             continue
         carrier = str(ws.cell(row=r, column=PARTS_CARRIER_COL).value or "").strip()
         remark2 = f"{PARTS_LABEL} / {carrier}" if carrier else PARTS_LABEL
+        address = str(ws.cell(row=r, column=PARTS_ADDRESS_COL).value or "").strip()
         rows.append(
             {
                 "案件No": an_no,
+                "納入先住所": address,
                 "案件名": case_name,
                 "出荷日": to_md(ws.cell(row=r, column=PARTS_SHIP_COL).value, today),
                 "着日": to_md(ws.cell(row=r, column=PARTS_ARR_COL).value, today),
@@ -218,6 +224,16 @@ def md_to_date(md_str: str, today: date) -> date | None:
     return min(candidates, key=lambda d: abs((d - today).days))
 
 
+# 各依頼先の元データにおける納入先住所の列番号（1始まり）
+# matsuzaki のみ G列(7)、その他は F列(6)
+SOURCE_ADDRESS_COL: dict[str, int] = {
+    "matsuzaki": 7,
+    "fukuoka": 6,
+    "nakadori": 6,
+    "maruun": 6,
+}
+
+
 def collect_all_rows(config: dict[str, Any], today: date, window_end: date) -> list[dict[str, Any]]:
     """4社の元データから抽出する。着日でなく出荷日基準で抽出範囲を判定する
     （window_date_field="ship"）。
@@ -260,6 +276,18 @@ def collect_all_rows(config: dict[str, Any], today: date, window_end: date) -> l
             excluded_sheet_keywords=excluded_sheet_keywords,
             row_exclude_predicate=row_exclude_predicate,
         )
+        # 行キーからシート名・行番号を逆引きして納入先住所列を付加する
+        addr_col = SOURCE_ADDRESS_COL.get(key, 6)
+        for row in rows:
+            row_key_parts = row.get("行キー", "").split("|")
+            if len(row_key_parts) >= 3:
+                try:
+                    ws_addr = workbook[row_key_parts[1]]
+                    row["納入先住所"] = str(ws_addr.cell(row=int(row_key_parts[2]), column=addr_col).value or "").strip()
+                except Exception:
+                    row["納入先住所"] = ""
+            else:
+                row["納入先住所"] = ""
         workbook.close()
         logging.info("抽出件数: %s = %d", key, len(rows))
         all_rows.extend(rows)
@@ -342,7 +370,16 @@ MAIN_ROW_HEIGHT = 81.75
 # 見出し行は1行テキストのみなのでデータ行より低くする
 HEADER_ROW_HEIGHT = 24.0
 # 列幅(pt)を実書式から取得（Graph APIのcolumnWidthはptそのまま使える）
-MAIN_COLUMN_WIDTH_PT = {"A": 113.25, "B": 264.0, "C": 74.25, "D": 78.0, "E": 119.25, "F": 355.5, "G": 126.75}
+MAIN_COLUMN_WIDTH_PT = {
+    "A": 113.25,  # 案件No
+    "B": 355.5,   # 納入先住所（新規）
+    "C": 264.0,   # 案件名（旧B）
+    "D": 74.25,   # 出荷日（旧C）
+    "E": 78.0,    # 着日（旧D）
+    "F": 119.25,  # 備考①（旧E）
+    "G": 355.5,   # 備考②（旧F）
+    "H": 126.75,  # 車型（旧G）
+}
 # Excel組み込みテーブルスタイル「赤、テーブルスタイル（中間）17」の内部名
 TABLE_STYLE_NAME = "TableStyleMedium17"
 # 出荷日ごとの区切り見出し行（黒背景・白文字。テーブル内の通常行として挟む）
@@ -485,11 +522,11 @@ def ensure_summary_file_exists(graph_token: str, remote_path: str) -> dict[str, 
 
 # E列(備考)・F列(型式)・G列(車型)は営業用Excelの見出し文字のままだと意味が伝わらないため、
 # サマリー側だけ表示ラベルを上書きする（列番号=SUMMARY_OUTPUT_COLUMNSのindexで指定、データ自体は変えない）。
-HEADER_LABEL_OVERRIDES = {4: "備考①", 5: "備考②", 6: "車型"}
+HEADER_LABEL_OVERRIDES = {5: "備考①", 6: "備考②", 7: "車型"}
 
 
 def fetch_main_header_row(graph_token: str, config: dict[str, Any]) -> list[str]:
-    """営業用Excelの6行目（A6:G6）の見出しをコピーし、一部ラベルを上書きする。"""
+    """営業用Excelの6行目（A6:G6）の見出しをコピーし、B列に納入先住所を挿入した8列分を返す。"""
     od = config.get("onedrive_output", {})
     remote_path = od.get("path", "/ドライバー情報/ドライバー情報_営業用.xlsm")
     sheet_name = od.get("sheet_name", "ドライバー情報")
@@ -498,9 +535,12 @@ def fetch_main_header_row(graph_token: str, config: dict[str, Any]) -> list[str]
     address = f"A{HEADER_ROW}:G{HEADER_ROW}"
     values = graph_read_range_values(graph_token, item_id, sheet_name, address, session_id=None)
     if values and values[0]:
-        header_values = [str(v) if v is not None else "" for v in values[0]]
+        orig = [str(v) if v is not None else "" for v in values[0]]
     else:
-        header_values = list(SUMMARY_OUTPUT_COLUMNS)
+        # フォールバック: SUMMARY_OUTPUT_COLUMNS から納入先住所以外を使用
+        orig = [c for c in SUMMARY_OUTPUT_COLUMNS if c != "納入先住所"]
+    # 営業用ExcelはA〜G列（7列）なので、B位置に「納入先住所」を挿入して8列にする
+    header_values = [orig[0], "納入先住所"] + orig[1:]
     for col_index, label in HEADER_LABEL_OVERRIDES.items():
         if col_index < len(header_values):
             header_values[col_index] = label
@@ -597,7 +637,7 @@ def build_summary_layout(
     }
 
 
-CLEAR_RANGE = "A1:G500"
+CLEAR_RANGE = "A1:H500"
 
 
 def write_summary_via_graph(
