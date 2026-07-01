@@ -310,7 +310,12 @@ def collect_all_rows(config: dict[str, Any], today: date, window_end: date) -> l
                 or "司企業鳥栖(営)積込み" in cell(row_tuple, "F")
             )
         elif key == "matsuzaki":
-            row_exclude_predicate = lambda row_tuple: "司鳥栖倉庫積込み" in cell(row_tuple, "G")
+            # G列に「司鳥栖倉庫積込み」がある行は除外するが、
+            # 案件名(H列)が「司企業」の横持案件は除外しない（宛先が司企業の行は有効）
+            row_exclude_predicate = lambda row_tuple: (
+                "司鳥栖倉庫積込み" in cell(row_tuple, "G")
+                and "司企業" not in cell(row_tuple, "H")
+            )
         else:
             row_exclude_predicate = None
         rows = extract_rows_from_workbook(
