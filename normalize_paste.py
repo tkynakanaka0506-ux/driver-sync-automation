@@ -36,9 +36,7 @@ EXCEL_BASE = datetime(1899, 12, 30)
 
 
 def serial_to_date_str(val) -> str:
-    """Excelの日付シリアル値 → "YYYY/MM/DD" 文字列。日付以外はそのまま返す。"""
-    if isinstance(val, (int, float)) and val > 1:
-        return (EXCEL_BASE + timedelta(days=int(val))).strftime("%Y/%m/%d")
+    """Excelの日付シリアル値はそのまま返す（書式はnumberFormatで設定）。"""
     return val
 
 
@@ -139,7 +137,11 @@ def main() -> int:
 
     base = f"{GRAPH_BASE}/drives/{drive_id}/items/{item_id}/workbook"
     ws_res = requests.get(f"{base}/worksheets", headers=headers)
-    sheet_name = ws_res.json()["value"][0]["name"]
+    ws_data = ws_res.json()
+    if not ws_res.ok or "value" not in ws_data:
+        print("worksheets取得失敗:", ws_res.status_code, ws_res.text[:500])
+        return 1
+    sheet_name = ws_data["value"][0]["name"]
 
     used_res = requests.get(
         f"{base}/worksheets('{sheet_name}')/usedRange(valuesOnly=true)",
@@ -182,10 +184,14 @@ def main() -> int:
             row_vals[0] = (str(row_vals[0]).strip().upper() == "TRUE")
 
         new_row = remap(row_vals)
+        # 出荷日(E=index4)・着日(F=index5)をm/d書式、他はGeneral
+        number_formats = [["General"] * PASTE_WIDTH]
+        number_formats[0][4] = "m/d"
+        number_formats[0][5] = "m/d"
         patch_res = requests.patch(
             f"{base}/worksheets('{sheet_name}')/range(address='A{row_num}:N{row_num}')",
             headers=headers,
-            json={"values": [new_row]},
+            json={"values": [new_row], "numberFormat": number_formats},
         )
         if not patch_res.ok:
             print(f"{row_num}行目の書き込み失敗:", patch_res.status_code, patch_res.text[:300])
