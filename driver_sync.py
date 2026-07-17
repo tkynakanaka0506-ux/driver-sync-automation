@@ -731,7 +731,6 @@ def append_record_from_row_tuple(
     an_no: str,
     model_value: str,
 ) -> None:
-    driver = leg_fields_at(row_tuple, primary, 0)
     row_key = f"{config_key}|{actual_name}|{excel_row_num}"
     if part_index:
         row_key = f"{row_key}|{part_index}"
@@ -745,11 +744,10 @@ def append_record_from_row_tuple(
     )
     if has_relay:
         relay = leg_fields_at(row_tuple, effective_map["legs"][1], 0)
-        relay_text = (
-            f"2次配送（{relay['company']} / {relay['driver']} / "
-            f"{relay['plate']} / {relay['phone']}）"
-        )
-        remarks = f"{remarks}\n{relay_text}" if remarks else relay_text
+        driver = relay  # 2次配送のドライバー情報をメイン列に表示
+        remarks = f"{remarks}\n2次配送" if remarks else "2次配送"
+    else:
+        driver = leg_fields_at(row_tuple, primary, 0)
 
     results.append(
         {
@@ -1498,6 +1496,38 @@ def graph_batch_patch_fills(
         _post_fill_batch_with_retry(graph_token, requests_body, session_id)
 
 
+def graph_batch_patch_font_colors(
+    graph_token: str,
+    item_id: str,
+    sheet_name: str,
+    entries: list[tuple[str, str]],
+    session_id: str,
+) -> None:
+    """複数セル範囲のフォント色を $batch でまとめて適用する。"""
+    if not entries:
+        return
+    seg = worksheet_segment(sheet_name)
+    for start in range(0, len(entries), GRAPH_BATCH_CHUNK):
+        chunk = entries[start:start + GRAPH_BATCH_CHUNK]
+        requests_body = [
+            {
+                "id": str(i),
+                "method": "PATCH",
+                "url": (
+                    f"/me/drive/items/{item_id}/workbook/"
+                    f"{seg}/range(address='{address}')/format/font"
+                ),
+                "headers": {
+                    "Content-Type": "application/json",
+                    "workbook-session-id": session_id,
+                },
+                "body": {"color": color_hex},
+            }
+            for i, (address, color_hex) in enumerate(chunk)
+        ]
+        _post_fill_batch_with_retry(graph_token, requests_body, session_id)
+
+
 def graph_batch_clear_fills(
     graph_token: str,
     item_id: str,
@@ -1717,6 +1747,19 @@ def apply_output_row_colors(
 
     graph_batch_patch_fills(graph_token, item_id, sheet_name, fills, session_id)
     graph_batch_clear_fills(graph_token, item_id, sheet_name, clear_addresses, session_id)
+
+    # 2次配送行の備考列を赤文字、それ以外は黒文字にリセット
+    remarks_col = col_map.get("備考")
+    if remarks_col:
+        font_entries: list[tuple[str, str]] = []
+        for idx, row in enumerate(rows):
+            excel_row = data_start_row + idx
+            addr = range_address(remarks_col, remarks_col, excel_row, excel_row)
+            color = "#FF0000" if row.get("中継あり") else "#000000"
+            font_entries.append((addr, color))
+        graph_batch_patch_font_colors(
+            graph_token, item_id, sheet_name, font_entries, session_id
+        )
 
     highlight_case = next(iter(color_map.values()), HIGHLIGHT_CASE_FILL_HEX)
     logging.info(
