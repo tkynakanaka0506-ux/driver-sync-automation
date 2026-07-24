@@ -144,12 +144,13 @@ GRAPH_SCOPES = [
 
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 
-SOURCE_ORDER = ["matsuzaki", "nakadori", "fukuoka", "maruun"]
+SOURCE_ORDER = ["matsuzaki", "nakadori", "fukuoka", "maruun", "ks"]
 SOURCE_DISPLAY_NAMES = {
     "matsuzaki": "松崎運輸",
     "nakadori": "中通",
     "fukuoka": "福岡ロジテック",
     "maruun": "丸運",
+    "ks": "KSサポート",
 }
 DEBUG_OUTPUT_PATH = SCRIPT_DIR / "debug_extract_output.json"
 API_DEBUG_PATH = SCRIPT_DIR / "debug_api_last.json"
@@ -163,6 +164,7 @@ CASE_NAME_COLUMN: dict[tuple[str, str], str] = {
     ("nakadori", "滋賀管理シート"): "K",
     ("nakadori", "滋賀倉庫管理シート"): "K",
     ("maruun", "管理シート"): "L",
+    ("ks", "車両依頼書"): "G",
 }
 
 # Office Script と同じ列マッピング（固定・検証済み）
@@ -255,6 +257,20 @@ SHEET_CONFIG: dict[str, list[dict[str, Any]]] = {
             "arrTime": "G",
             "carNo": "Q",
             "legs": [{"company": "S", "driver": "T", "plate": "U", "phone": "V"}],
+        }
+    ],
+    "ks": [
+        {
+            "sheet": "車両依頼書",
+            "anNo": "B",
+            "anName": "G",
+            "ship": "C",
+            "arr": "D",
+            "model": "X",
+            "car": ["J", "K", "L"],
+            "arrTime": "E",
+            "carNo": "",
+            "legs": [{"company": "W", "driver": "Y", "plate": "Z", "phone": "AA"}],
         }
     ],
 }
