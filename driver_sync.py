@@ -193,8 +193,8 @@ SHEET_CONFIG: dict[str, list[dict[str, Any]]] = {
             "arrTime": "E",
             "carNo": "M",
             "legs": [
-                {"company": "Y", "driver": "Z", "plate": "AA", "phone": "AB"},
-                {"company": "AC", "driver": "AD", "plate": "AE", "phone": "AF"},
+                {"company": "X", "driver": "Y", "plate": "Z", "phone": "AA"},
+                {"company": "AB", "driver": "AC", "plate": "AD", "phone": "AE"},
             ],
         },
         {
@@ -979,14 +979,14 @@ def arr_window_start(today: date, days_back: int) -> date:
 
 
 def arr_window_end(today: date) -> date:
-    """着日上限: 明後日（暦日）。ただし今日が金曜日の場合は、土日を挟むため
+    """着日上限: 3日後（暦日）。ただし今日が金曜日の場合は、土日を挟むため
     月曜（祝日なら火曜）まで延長する。"""
     if today.weekday() == 4:  # 0=月 ... 4=金
         monday = today + timedelta(days=3)
         if jpholiday.is_holiday(monday):
             return monday + timedelta(days=1)
         return monday
-    return today + timedelta(days=2)
+    return today + timedelta(days=3)
 
 
 def is_arr_in_sync_window(
