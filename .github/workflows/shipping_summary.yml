@@ -38,6 +38,7 @@ jobs:
 
       - name: Persist refreshed token cache back to secret
         if: always()
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.SECRETS_PAT }}
         run: |
