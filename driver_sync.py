@@ -995,13 +995,13 @@ def arr_window_start(today: date, days_back: int) -> date:
 
 
 def arr_window_end(today: date) -> date:
-    """着日上限: 3日後（暦日）。ただし今日が金曜日の場合は、土日を挟むため
-    月曜（祝日なら火曜）まで延長する。"""
+    """着日上限: 3日後（暦日）。ただし今日が金曜日の場合は、土日＋連続祝日を
+    すべて跨いで次の平日（月曜以降の最初の非祝日）まで延長する。"""
     if today.weekday() == 4:  # 0=月 ... 4=金
-        monday = today + timedelta(days=3)
-        if jpholiday.is_holiday(monday):
-            return monday + timedelta(days=1)
-        return monday
+        candidate = today + timedelta(days=3)  # 月曜
+        while jpholiday.is_holiday(candidate):
+            candidate += timedelta(days=1)
+        return candidate
     return today + timedelta(days=3)
 
 
@@ -3014,12 +3014,13 @@ ISSUE_CATEGORY_KEYWORDS = [
 ISSUE_CASE_NO_PATTERN = re.compile(r"\b[A-Z][A-Z0-9]{3,9}-\d{1,2}\b")
 ISSUE_CASE_AFTER_LABEL_PATTERN = re.compile(r"案件=([^\s]+)")
 ISSUE_SHIP_DATE_PATTERN = re.compile(r"出荷日=([\d/]+)")
-ISSUE_SOURCE_KEY_PATTERN = re.compile(r"\b(matsuzaki|nakadori|fukuoka|maruun)\b")
+ISSUE_SOURCE_KEY_PATTERN = re.compile(r"\b(matsuzaki|nakadori|fukuoka|maruun|ks)\b")
 ISSUE_SOURCE_ABBREV = {
     "matsuzaki": "松崎",
     "nakadori": "中通",
     "fukuoka": "福岡ロジ",
     "maruun": "丸運",
+    "ks": "KS",
 }
 E3_MAX_LEN = 40  # セルに収まる目安の文字数。超えたらE4に続きを出す。
 
