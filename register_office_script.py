@@ -61,14 +61,28 @@ SCRIPT_CODE = r"""function main(workbook: ExcelScript.Workbook) {
     const checkmark =
       aVal === true || String(aVal).trim().toUpperCase() === "TRUE" ? "✅" : "";
 
+    // 出荷日・着日はシリアル値のまま保持（書式をm/dに設定してカレンダーピッカーを有効化）
     const remapped: (string | number | boolean)[] = [
-      checkmark, src[1], src[2], src[4], src[5], src[6],
+      checkmark, src[1], src[2], src[4],
+      src[5], src[6],
       src[11], src[12], src[13],
       "", "", "", "", ""
     ];
 
     sheet.getRangeByIndexes(DATA_START_ROW + i, 0, 1, PASTE_COLS).setValues([remapped]);
+
+    // 出荷日(E=col4)・着日(F=col5)をm/d書式にする（年なし表示＋カレンダーピッカー有効）
+    sheet.getRangeByIndexes(DATA_START_ROW + i, 4, 1, 1).setNumberFormat("m/d");
+    sheet.getRangeByIndexes(DATA_START_ROW + i, 5, 1, 1).setNumberFormat("m/d");
+
     changed++;
+  }
+
+  // 全使用範囲を上下中央・水平中央揃えに設定
+  const fullRange = sheet.getUsedRange();
+  if (fullRange) {
+    fullRange.getFormat().setVerticalAlignment(ExcelScript.VerticalAlignment.center);
+    fullRange.getFormat().setHorizontalAlignment(ExcelScript.HorizontalAlignment.center);
   }
 
   console.log(`normalize_paste: ${changed}行を正規化しました。`);

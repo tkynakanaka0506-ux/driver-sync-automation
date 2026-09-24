@@ -943,7 +943,16 @@ def to_date(raw: Any, today: date) -> date | None:
         if len(parts) >= 3:
             return date(parts[0], parts[1], parts[2])
         if len(parts) == 2:
-            return date(today.year, parts[0], parts[1])
+            month, day = parts[0], parts[1]
+            candidates = []
+            for offset in (-1, 0, 1):
+                try:
+                    candidates.append(date(today.year + offset, month, day))
+                except ValueError:
+                    pass
+            if not candidates:
+                return None
+            return min(candidates, key=lambda d: abs((d - today).days))
     except ValueError:
         return None
     return None
@@ -2056,6 +2065,15 @@ def apply_alternating_padding_row_colors(
 
     graph_batch_patch_fills(graph_token, item_id, sheet_name, fills, session_id)
     graph_batch_clear_fills(graph_token, item_id, sheet_name, clear_addresses, session_id)
+
+    # パディング行の備考列フォント色を黒にリセット（前回2次配送行の赤文字残留を防ぐ）
+    remarks_col = col_map.get("備考")
+    if remarks_col:
+        font_reset = [
+            (range_address(remarks_col, remarks_col, r, r), "#000000")
+            for r in range(padding_start_row, padding_end_row + 1)
+        ]
+        graph_batch_patch_font_colors(graph_token, item_id, sheet_name, font_reset, session_id)
 
     row_count = padding_end_row - padding_start_row + 1
     logging.info(
