@@ -3608,23 +3608,30 @@ def run_sync(
     arr_window_start_date = arr_window_start(today, arr_days_back)
     arr_window_end_date = arr_window_end(today)
 
-    logging.info(
-        "同期開始: today=%s, 着日範囲=%s〜%s（%d日前〜明日・暦日）",
+    logging.warning(
+        "[同期開始] today=%s, 着日範囲=%s〜%s（%d日前〜%d日後）",
         today,
         arr_window_start_date,
         arr_window_end_date,
         arr_days_back,
+        (arr_window_end_date - today).days,
     )
 
     warning_counter = WarningCountHandler()
     logging.getLogger().addHandler(warning_counter)
 
     all_rows: list[dict[str, Any]] = []
+    source_counts: dict[str, int] = {}
     for source in config["sources"]:
         key = source["key"]
         share_url = source["share_url"]
         logging.info("取得中: %s", key)
-        content = download_share_file(share_url)
+        try:
+            content = download_share_file(share_url)
+        except Exception as e:
+            logging.warning("[%s] ファイル取得失敗（スキップ）: %s", key, e)
+            source_counts[key] = -1
+            continue
         workbook = openpyxl.load_workbook(
             BytesIO(content),
             read_only=False,
@@ -3639,6 +3646,7 @@ def run_sync(
             auto_detect_columns=auto_detect_columns,
         )
         workbook.close()
+        source_counts[key] = len(rows)
         logging.info("抽出件数: %s = %d", key, len(rows))
         all_rows.extend(rows)
 
@@ -3648,7 +3656,23 @@ def run_sync(
     logging.getLogger().removeHandler(warning_counter)
     issue_count = warning_counter.count
     issue_messages = warning_counter.messages
-    logging.info("合計抽出件数: %d（要確認警告: %d件）", len(all_rows), issue_count)
+
+    # ソース別抽出件数サマリー（GitHub Actionsログに出力）
+    summary_parts = []
+    for key, cnt in source_counts.items():
+        name = SOURCE_DISPLAY_NAMES.get(key, key)
+        if cnt < 0:
+            summary_parts.append(f"{name}:取得失敗")
+        else:
+            summary_parts.append(f"{name}:{cnt}件")
+            if cnt == 0:
+                logging.warning("[%s] 抽出件数0件 — ソースファイルに着日範囲内データなし", key)
+    logging.warning(
+        "[同期完了] 合計%d件 | %s | 要確認警告:%d件",
+        len(all_rows),
+        " / ".join(summary_parts),
+        issue_count,
+    )
 
     data_start_row = int(
         config.get("onedrive_output", {}).get("data_start_row", 7)
