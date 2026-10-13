@@ -2256,6 +2256,64 @@ def graph_patch_range_values(
         )
 
 
+def apply_driver_check_column(
+    graph_token: str,
+    item_id: str,
+    ws_name: str,
+    session_id: str,
+    rows: list[dict[str, Any]],
+    col_map: dict[str, int],
+    data_start_row: int,
+    check_col_letter: str = "N",
+) -> None:
+    """ドライバー情報がある行の N 列に「〇」を書く。
+    ユーザーが手動で「×」に変えたセルは上書きしない。
+    ドライバー情報がない行は空にする。
+    """
+    row_count = len(rows)
+    if row_count == 0:
+        return
+
+    data_end_row = data_start_row + row_count - 1
+    col_address = f"{check_col_letter}{data_start_row}:{check_col_letter}{data_end_row}"
+
+    # 現在の N 列の値を取得（× 保護のため）
+    seg = worksheet_segment(ws_name)
+    get_url = (
+        f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/"
+        f"{seg}/range(address='{col_address}')"
+    )
+    res = graph_request_with_retry("GET", get_url, graph_token, session_id=session_id)
+    existing: list[str] = []
+    if res.ok:
+        vals = res.json().get("values", [])
+        existing = [str(v[0]).strip() if v else "" for v in vals]
+    else:
+        existing = [""] * row_count
+
+    # 新しい値を決定: × はそのまま / ドライバーあり→〇 / なし→空
+    new_values: list[list[str]] = []
+    for i, row in enumerate(rows):
+        cur = existing[i] if i < len(existing) else ""
+        if cur == "×":
+            new_values.append(["×"])
+        elif row.get("会社名") or row.get("乗務員"):
+            new_values.append(["〇"])
+        else:
+            new_values.append([""])
+
+    graph_patch_range_values(
+        graph_token, item_id, ws_name, col_address, new_values, session_id
+    )
+    logging.info(
+        "ドライバー確認列(%s): 〇=%d / ×保持=%d / 空=%d",
+        check_col_letter,
+        sum(1 for v in new_values if v[0] == "〇"),
+        sum(1 for v in new_values if v[0] == "×"),
+        sum(1 for v in new_values if v[0] == ""),
+    )
+
+
 def graph_set_number_format(
     graph_token: str,
     item_id: str,
@@ -2788,6 +2846,15 @@ def update_onedrive_values_only(
                 col_map=col_map,
                 config=config,
             )
+            apply_driver_check_column(
+                graph_token,
+                item_id,
+                ws_name,
+                session_id,
+                rows,
+                col_map,
+                data_start_row=data_start_row,
+            )
             api_trace["steps"].append(
                 {
                     "method": "PATCH",
@@ -2832,6 +2899,13 @@ def update_onedrive_values_only(
                 config=config,
                 padding_start_row=padding_start_row,
                 padding_end_row=padding_end_row,
+            )
+            # パディング行の N 列（ドライバー確認列）をクリア
+            pad_check_address = f"N{padding_start_row}:N{padding_end_row}"
+            graph_patch_range_values(
+                graph_token, item_id, ws_name, pad_check_address,
+                [[""] for _ in range(padding_end_row - padding_start_row + 1)],
+                session_id,
             )
             logging.info(
                 "Graph API: 書込範囲外 %d 行を整理（値クリア %s）",
