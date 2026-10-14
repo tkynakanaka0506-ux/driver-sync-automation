@@ -2846,15 +2846,6 @@ def update_onedrive_values_only(
                 col_map=col_map,
                 config=config,
             )
-            apply_driver_check_column(
-                graph_token,
-                item_id,
-                ws_name,
-                session_id,
-                rows,
-                col_map,
-                data_start_row=data_start_row,
-            )
             api_trace["steps"].append(
                 {
                     "method": "PATCH",
@@ -2899,13 +2890,6 @@ def update_onedrive_values_only(
                 config=config,
                 padding_start_row=padding_start_row,
                 padding_end_row=padding_end_row,
-            )
-            # パディング行の N 列（ドライバー確認列）をクリア
-            pad_check_address = f"N{padding_start_row}:N{padding_end_row}"
-            graph_patch_range_values(
-                graph_token, item_id, ws_name, pad_check_address,
-                [[""] for _ in range(padding_end_row - padding_start_row + 1)],
-                session_id,
             )
             logging.info(
                 "Graph API: 書込範囲外 %d 行を整理（値クリア %s）",
