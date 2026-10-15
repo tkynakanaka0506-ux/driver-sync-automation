@@ -1,14 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""毎月デスクトップのフォルダへ Excel をバックアップする。
+"""ドライバー情報_営業用.xlsx を毎月デスクトップのフォルダへバックアップする。
 
-バックアップ対象:
-  1. ドライバー情報_営業用.xlsx  (OneDrive 出力ファイル)
-  2. 中通 運行管理シート          (匿名共有リンク)
-  3. 松崎運輸 運行管理シート      (匿名共有リンク)
-
-保存先: Desktop/ドライバー情報バックアップ/YYYY-MM/
 タスクスケジューラから月1回自動実行される。
+保存先: Desktop/ドライバー情報バックアップ/YYYY-MM/ドライバー情報_YYYY-MM.xlsx
 """
 
 from __future__ import annotations
@@ -33,23 +28,6 @@ GRAPH_SCOPES = [
 DESKTOP = Path.home() / "Desktop"
 BACKUP_FOLDER = DESKTOP / "ドライバー情報バックアップ"
 
-BROWSER_UA = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
-    )
-}
-
-# 匿名共有リンクでバックアップするソースファイル
-SOURCE_BACKUPS = [
-    {"key": "nakadori", "label": "中通",     "filename": "中通_運行管理_{ym}.xlsx"},
-    {"key": "matsuzaki","label": "松崎運輸",  "filename": "松崎運輸_運行管理_{ym}.xlsx"},
-]
-
-
-# ---------------------------------------------------------------------------
-# 認証（OneDrive 出力ファイル用）
-# ---------------------------------------------------------------------------
 
 def acquire_token() -> str:
     config = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
@@ -77,12 +55,7 @@ def acquire_token() -> str:
     return result["access_token"]
 
 
-# ---------------------------------------------------------------------------
-# ダウンロード関数
-# ---------------------------------------------------------------------------
-
 def get_onedrive_file_bytes(token: str, remote_path: str) -> bytes:
-    """自分の OneDrive から指定パスのファイルをダウンロード。"""
     encoded = requests.utils.quote(remote_path, safe="/")
     url = f"{GRAPH_BASE}/me/drive/root:{encoded}:/content"
     res = requests.get(url, headers={"Authorization": f"Bearer {token}"}, allow_redirects=True)
@@ -91,83 +64,25 @@ def get_onedrive_file_bytes(token: str, remote_path: str) -> bytes:
     return res.content
 
 
-def download_share_file(share_url: str) -> bytes:
-    """匿名共有リンク(1drv.ms)から認証なしでダウンロード。"""
-    sep = "&" if "?" in share_url else "?"
-    url = f"{share_url}{sep}download=1"
-    res = requests.get(url, headers=BROWSER_UA, timeout=180, allow_redirects=True)
-    if not res.ok:
-        raise RuntimeError(f"ファイル取得失敗: {res.status_code} {res.text[:200]}")
-    if res.content[:4] != b"PK\x03\x04":
-        raise RuntimeError(
-            f"取得データがExcel(xlsx)ではありません。先頭={res.content[:8]!r}"
-        )
-    return res.content
-
-
-# ---------------------------------------------------------------------------
-# メイン
-# ---------------------------------------------------------------------------
-
 def main() -> int:
     config = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-    today = date.today()
-    ym = today.strftime("%Y-%m")
-
-    # 月別サブフォルダ作成: Desktop/ドライバー情報バックアップ/2026-10/
-    month_folder = BACKUP_FOLDER / ym
-    month_folder.mkdir(parents=True, exist_ok=True)
-    print(f"保存先フォルダ: {month_folder}\n")
-
-    errors: list[str] = []
-
-    # --- 1. ドライバー情報_営業用.xlsx (OneDrive) ---
     remote_path: str = config.get("onedrive_output", {}).get(
         "path", "/クロードコード/ドライバー情報_営業用.xlsx"
     )
+
+    today = date.today()
+    ym = today.strftime("%Y-%m")
+    month_folder = BACKUP_FOLDER / ym
+    month_folder.mkdir(parents=True, exist_ok=True)
+
     filename = f"ドライバー情報_{ym}.xlsx"
     save_path = month_folder / filename
-    try:
-        print(f"[1/3] ドライバー情報_営業用.xlsx をダウンロード中...")
-        token = acquire_token()
-        data = get_onedrive_file_bytes(token, remote_path)
-        save_path.write_bytes(data)
-        print(f"      保存完了: {filename}  ({len(data):,} bytes)")
-    except Exception as e:
-        msg = f"ドライバー情報_営業用: {e}"
-        print(f"      エラー: {msg}")
-        errors.append(msg)
 
-    # --- 2 & 3. 中通・松崎運輸（匿名共有リンク） ---
-    sources_by_key = {s["key"]: s for s in config.get("sources", [])}
-    for i, target in enumerate(SOURCE_BACKUPS, start=2):
-        key = target["key"]
-        label = target["label"]
-        filename = target["filename"].format(ym=ym)
-        save_path = month_folder / filename
-        src = sources_by_key.get(key)
-        if not src:
-            msg = f"{label}: config に share_url が見つかりません"
-            print(f"[{i}/3] {msg}")
-            errors.append(msg)
-            continue
-        try:
-            print(f"[{i}/3] {label} をダウンロード中...")
-            data = download_share_file(src["share_url"])
-            save_path.write_bytes(data)
-            print(f"      保存完了: {filename}  ({len(data):,} bytes)")
-        except Exception as e:
-            msg = f"{label}: {e}"
-            print(f"      エラー: {msg}")
-            errors.append(msg)
-
-    print()
-    if errors:
-        print(f"完了（{len(errors)}件エラー）:")
-        for err in errors:
-            print(f"  - {err}")
-        return 1
-    print("全て完了。")
+    print(f"[monthly_backup] ダウンロード中: {remote_path}")
+    token = acquire_token()
+    data = get_onedrive_file_bytes(token, remote_path)
+    save_path.write_bytes(data)
+    print(f"[monthly_backup] 保存完了: {save_path}  ({len(data):,} bytes)")
     return 0
 
 
