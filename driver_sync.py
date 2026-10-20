@@ -176,11 +176,11 @@ SHEET_CONFIG: dict[str, list[dict[str, Any]]] = {
             "anName": "H",
             "ship": "D",
             "arr": "E",
-            "model": "O",
+            "model": "J",   # J=製品種別（旧O=運賃は誤り）
             "car": ["K", "L", "M"],
             "arrTime": "F",
             "carNo": "N",
-            "legs": [{"company": "S", "driver": "T", "plate": "U", "phone": "V"}],
+            "legs": [{"company": "U", "driver": "V", "plate": "W", "phone": "X"}],  # 旧S/T/U/Vは2列ずれ
         }
     ],
     "fukuoka": [
@@ -190,13 +190,13 @@ SHEET_CONFIG: dict[str, list[dict[str, Any]]] = {
             "anName": "G",
             "ship": "C",
             "arr": "D",
-            "model": "S",
+            "model": "I",   # I=製品種別（旧S=備考は誤り）
             "car": ["J", "K", "L"],
             "arrTime": "E",
             "carNo": "M",
             "legs": [
-                {"company": "X", "driver": "Y", "plate": "Z", "phone": "AA"},
-                {"company": "AB", "driver": "AC", "plate": "AD", "phone": "AE"},
+                {"company": "X", "driver": "Y", "plate": "AA", "phone": "AB"},   # 旧plate=Z(都道府県)は誤り
+                {"company": "AC", "driver": "AD", "plate": "AE", "phone": "AF"},  # 旧AB/AC/AD/AEは1列ずれ
             ],
         },
         {
@@ -206,7 +206,7 @@ SHEET_CONFIG: dict[str, list[dict[str, Any]]] = {
             "anName": "I",
             "ship": "E",
             "arr": "F",
-            "model": "U",
+            "model": "J",   # J=製品種別（旧U=備考は誤り）
             "car": ["L", "M", "N"],
             "arrTime": "G",
             "carNo": "O",
@@ -223,8 +223,8 @@ SHEET_CONFIG: dict[str, list[dict[str, Any]]] = {
             "anName": "G",
             "ship": "C",
             "arr": "D",
-            "model": "R",
-            "car": ["J", "L"],
+            "model": "I",   # I=製品種別（旧R=備考は誤り）
+            "car": ["J", "K", "L"],  # 旧["J","L"]はK=仕様①の抜け
             "arrTime": "E",
             "carNo": "M",
             "legs": [
@@ -266,8 +266,8 @@ SHEET_CONFIG: dict[str, list[dict[str, Any]]] = {
             "anName": "G",
             "ship": "C",
             "arr": "D",
-            "model": "X",
-            "car": ["J", "K", "L"],
+            "model": "I",   # I=製品種別（旧X=車型は誤り）
+            "car": ["O", "P"],  # O=車種, P=仕様①（旧J/K/L=W/D/H寸法は誤り）
             "arrTime": "E",
             "carNo": "",
             "legs": [{"company": "W", "driver": "Y", "plate": "Z", "phone": "AA"}],
