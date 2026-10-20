@@ -235,14 +235,14 @@ SHEET_CONFIG: dict[str, list[dict[str, Any]]] = {
         {
             "sheet": "滋賀倉庫管理シート",
             "anNo": "B",
-            "anName": "K",
+            "anName": "L",
             "ship": "E",
             "arr": "F",
-            "model": "T",
-            "car": ["M", "N", "O"],
+            "model": "M",
+            "car": ["N", "O"],
             "arrTime": "G",
-            "carNo": "P",
-            "legs": [{"company": "U", "driver": "V", "plate": "W", "phone": "X"}],
+            "carNo": "",
+            "legs": [{"company": "V", "driver": "W", "plate": "X", "phone": "Y"}],
         },
     ],
     "maruun": [
@@ -252,11 +252,11 @@ SHEET_CONFIG: dict[str, list[dict[str, Any]]] = {
             "anName": "L",
             "ship": "E",
             "arr": "F",
-            "model": "R",
+            "model": "M",
             "car": ["N", "O", "P"],
             "arrTime": "G",
             "carNo": "Q",
-            "legs": [{"company": "S", "driver": "T", "plate": "U", "phone": "V"}],
+            "legs": [{"company": "U", "driver": "V", "plate": "W", "phone": "X"}],
         }
     ],
     "ks": [
