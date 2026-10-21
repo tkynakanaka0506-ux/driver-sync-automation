@@ -194,9 +194,10 @@ SHEET_CONFIG: dict[str, list[dict[str, Any]]] = {
             "car": ["J", "K", "L"],
             "arrTime": "E",
             "carNo": "M",
+            "prefecture": "Z",  # Z=都道府県（車番の頭に付与: 例「福岡1111」）
             "legs": [
-                {"company": "X", "driver": "Y", "plate": "AA", "phone": "AB"},   # 旧plate=Z(都道府県)は誤り
-                {"company": "AC", "driver": "AD", "plate": "AE", "phone": "AF"},  # 旧AB/AC/AD/AEは1列ずれ
+                {"company": "X", "driver": "Y", "plate": "AA", "phone": "AB"},
+                {"company": "AC", "driver": "AD", "plate": "AE", "phone": "AF"},
             ],
         },
         {
@@ -765,6 +766,14 @@ def append_record_from_row_tuple(
     else:
         driver = leg_fields_at(row_tuple, primary, 0)
 
+    # 都道府県が設定されている場合、車番の頭に付与（例: Z列="福岡" + AA列="1111" → "福岡1111"）
+    plate_val = driver["plate"]
+    pref_col = effective_map.get("prefecture", "")
+    if pref_col:
+        pref_val = str(cell(row_tuple, pref_col) or "").strip()
+        if pref_val and plate_val:
+            plate_val = f"{pref_val}{plate_val}"
+
     results.append(
         {
             "案件No": an_no,
@@ -781,7 +790,7 @@ def append_record_from_row_tuple(
             "車型": join_car_row(row_tuple, effective_map["car"]),
             "会社名": driver["company"],
             "乗務員": driver["driver"],
-            "車番": driver["plate"],
+            "車番": plate_val,
             "携帯番号": driver["phone"],
             "携帯番号秘": driver["phone"],
             "備考": remarks,
@@ -1046,6 +1055,8 @@ def max_col_for_map(sheet_map: dict[str, Any]) -> int:
         letters.append(sheet_map["arrTime"])
     if sheet_map.get("carNo"):
         letters.append(sheet_map["carNo"])
+    if sheet_map.get("prefecture"):
+        letters.append(sheet_map["prefecture"])
     for leg in sheet_map["legs"]:
         letters.extend([leg["company"], leg["driver"], leg["plate"], leg["phone"]])
     return max(col_idx(letter) for letter in letters) + 1
