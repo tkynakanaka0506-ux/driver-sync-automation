@@ -3282,11 +3282,11 @@ def write_chukei_sheet(
     od = (config or {}).get("onedrive_output", {})
     driver_sheet = od.get("sheet_name", "ドライバー情報")
 
-    # 行1〜3をドライバー情報シートからコピー
+    # 行1〜5をドライバー情報シートからコピー（行4=注意書き、行5=★案件情報★ラベル行）
     try:
         src_url = (
             f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/"
-            f"worksheets('{driver_sheet}')/range(address='A1:M3')"
+            f"worksheets('{driver_sheet}')/range(address='A1:M5')"
         )
         src_res = graph_request_with_retry(
             "GET", src_url, graph_token, session_id=session_id
@@ -3296,15 +3296,15 @@ def write_chukei_sheet(
             if src_values:
                 dst_url = (
                     f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/"
-                    f"{seg}/range(address='A1:M3')"
+                    f"{seg}/range(address='A1:M5')"
                 )
                 graph_request_with_retry(
                     "PATCH", dst_url, graph_token, session_id=session_id,
                     json={"values": src_values},
                 )
-                logging.info("「%s」行1〜3をドライバー情報シートからコピー完了", CHUKEI_SHEET)
+                logging.info("「%s」行1〜5をドライバー情報シートからコピー完了", CHUKEI_SHEET)
     except Exception as exc:
-        logging.warning("「%s」行1〜3コピー失敗（スキップ）: %s", CHUKEI_SHEET, exc)
+        logging.warning("「%s」行1〜5コピー失敗（スキップ）: %s", CHUKEI_SHEET, exc)
 
     def sort_key(r: dict) -> str:
         return str(r.get("出荷日") or "")
@@ -3332,12 +3332,13 @@ def write_chukei_sheet(
     total_cols = len(CHUKEI_COLUMNS)
     last_col = col_letter_from_index(total_cols)
 
-    # 6行目にヘッダーを書き込む
-    header_address = f"A{HEADER_ROW}:{last_col}{HEADER_ROW}"
+    # 6行目にヘッダーを書き込む（M列まで書いて旧データをクリア）
+    header_row_data = CHUKEI_COLUMNS + [""]  # 13列目(M)に空を入れてクリア
+    header_address = f"A{HEADER_ROW}:M{HEADER_ROW}"
     url_header = f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/{seg}/range(address='{header_address}')"
     graph_request_with_retry(
         "PATCH", url_header, graph_token, session_id=session_id,
-        json={"values": [CHUKEI_COLUMNS]},
+        json={"values": [header_row_data]},
     )
 
     # 7行目以降にデータを書き込む
