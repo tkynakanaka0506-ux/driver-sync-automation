@@ -3397,7 +3397,7 @@ def write_chukei_sheet(
 
     # 列幅を適正に設定（A〜L列）
     # A=案件No B=案件名 C=出荷日 D=着日 E=備考 F=型式 G=車型 H=会社名 I=乗務員 J=車番 K=携帯番号 L=依頼先
-    col_widths = [75, 160, 65, 65, 130, 160, 85, 105, 65, 65, 85, 70]
+    col_widths = [90, 200, 75, 75, 160, 200, 100, 130, 80, 90, 100, 80]
     for i, width in enumerate(col_widths):
         col_letter = col_letter_from_index(i + 1)
         fmt_url = (
