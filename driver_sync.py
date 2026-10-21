@@ -3271,9 +3271,10 @@ def write_alert_label(
 
 
 CHUKEI_SHEET = "出庫案件"
-# ドライバー情報シートと同じ列順（E列=備考に着時間を含む）
+# A〜L=表示列, M=携帯番号実（非表示・パスワード解錠用）
 CHUKEI_COLUMNS = ["案件No", "案件名", "出荷日", "着日", "備考",
-                  "型式", "車型", "会社名", "乗務員", "車番", "携帯番号", "依頼先"]
+                  "型式", "車型", "会社名", "乗務員", "車番", "携帯番号", "依頼先", ""]
+CHUKEI_PASSWORD = "1229"
 
 
 def write_chukei_sheet(
@@ -3343,28 +3344,44 @@ def write_chukei_sheet(
     umi = sorted([r for r in target_rows if r.get("_sheet_type") != "gabu"], key=sort_key, reverse=True)
     gabu = sorted([r for r in target_rows if r.get("_sheet_type") == "gabu"], key=sort_key, reverse=True)
 
-    def to_row(r: dict) -> list:
+    # 行6 = ヘッダー、行7以降 = データ（行1〜5は既存の内容を保持）
+    HEADER_ROW = 6
+    DATA_START_ROW = 7
+
+    def to_row(r: dict, row_num: int) -> list:
+        """13列: A〜L=表示データ, M=携帯番号実（非表示）。K列はIF式で***またはM列の実番号を表示。"""
         key = r.get("依頼先", "")
-        # ドライバー情報シートと同じ列順: A=案件No B=案件名 C=出荷日 D=着日 E=備考(着時間) F=型式 G=車型 H=会社名 I=乗務員 J=車番 K=携帯番号 L=依頼先
+        real_phone = r.get("携帯番号", "")
+        # K列: B2=パスワード一致 かつ B3=この行の案件No の場合のみ実番号を表示
+        formula_k = f'=IF(AND($B$2="{CHUKEI_PASSWORD}",$B$3=A{row_num}),M{row_num},"***")'
         return [
             r.get("案件No", ""),   r.get("案件名", ""),
             r.get("出荷日", ""),   r.get("着日", ""),
             r.get("備考", ""),     r.get("型式", ""),
             r.get("車型", ""),     r.get("会社名", ""),
             r.get("乗務員", ""),   r.get("車番", ""),
-            r.get("携帯番号", ""), SOURCE_DISPLAY_NAMES.get(key, key),
+            formula_k,             SOURCE_DISPLAY_NAMES.get(key, key),
+            real_phone,            # M列: 実際の携帯番号（非表示列）
         ]
 
-    # 行6 = ヘッダー、行7以降 = データ（行1〜5は既存の内容を保持）
-    HEADER_ROW = 6
-    DATA_START_ROW = 7
+    all_ordered = umi + gabu
+    data_rows: list[list] = [to_row(r, DATA_START_ROW + i) for i, r in enumerate(all_ordered)]
+    total_cols = len(CHUKEI_COLUMNS)  # 13
+    last_col = col_letter_from_index(total_cols)  # M
 
-    data_rows: list[list] = list(to_row(r) for r in umi) + list(to_row(r) for r in gabu)
-    total_cols = len(CHUKEI_COLUMNS)
-    last_col = col_letter_from_index(total_cols)
+    # B2 にパスワード初期値を書き込む（ユーザーが直接入力する照合セル）
+    try:
+        graph_request_with_retry(
+            "PATCH",
+            f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/{seg}/range(address='B2')",
+            graph_token, session_id=session_id,
+            json={"values": [[CHUKEI_PASSWORD]]},
+        )
+    except Exception:
+        pass
 
-    # 6行目にヘッダーを書き込む（M列まで書いて旧データをクリア）
-    header_row_data = CHUKEI_COLUMNS + [""]  # 13列目(M)に空を入れてクリア
+    # 6行目にヘッダーを書き込む（M列はブランク=非表示用）
+    header_row_data = CHUKEI_COLUMNS  # 13列、M列は "" が入る
     header_address = f"A{HEADER_ROW}:M{HEADER_ROW}"
     url_header = f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/{seg}/range(address='{header_address}')"
     graph_request_with_retry(
@@ -3395,7 +3412,7 @@ def write_chukei_sheet(
     # 余剰行をクリア（前回より件数が減った場合）
     clear_start = data_end_row + 1
     clear_end = clear_start + 50
-    clear_address = f"A{clear_start}:{last_col}{clear_end}"
+    clear_address = f"A{clear_start}:M{clear_end}"  # M列まで
     clear_matrix = [[""] * total_cols for _ in range(51)]
     url_clear = f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/{seg}/range(address='{clear_address}')"
     graph_request_with_retry(
@@ -3403,9 +3420,9 @@ def write_chukei_sheet(
         json={"values": clear_matrix},
     )
 
-    # 列幅を適正に設定（A〜L列）
-    # A=案件No B=案件名 C=出荷日 D=着日 E=備考 F=型式 G=車型 H=会社名 I=乗務員 J=車番 K=携帯番号 L=依頼先
-    col_widths = [90, 260, 75, 75, 160, 260, 100, 130, 80, 120, 100, 80]
+    # 列幅を適正に設定（A〜M列）
+    # A=案件No B=案件名 C=出荷日 D=着日 E=備考 F=型式 G=車型 H=会社名 I=乗務員 J=車番 K=携帯番号 L=依頼先 M=携帯番号実(非表示:幅5)
+    col_widths = [90, 260, 75, 75, 160, 260, 100, 130, 80, 120, 100, 80, 5]
     for i, width in enumerate(col_widths):
         col_letter = col_letter_from_index(i + 1)
         fmt_url = (
@@ -3422,7 +3439,7 @@ def write_chukei_sheet(
 
     # データ行: 折り返し有効 → autofitRows で内容に合わせた行高さを自動設定
     if data_rows:
-        wrap_address = f"A{DATA_START_ROW}:{last_col}{data_end_row}"
+        wrap_address = f"A{DATA_START_ROW}:L{data_end_row}"  # L列まで（M列=非表示は折返し対象外）
         wrap_url = (
             f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/{seg}"
             f"/range(address='{wrap_address}')/format"
@@ -3446,10 +3463,10 @@ def write_chukei_sheet(
             logging.info("「%s」データ行 autofitRows 適用", CHUKEI_SHEET)
         except Exception as exc:
             logging.warning("autofitRows 失敗（スキップ）: %s", exc)
-    # ヘッダー行6は折り返しなし・固定高さ
+    # ヘッダー行6は折り返しなし・固定高さ（M列=非表示のため L列まで）
     hdr_fmt_url = (
         f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/{seg}"
-        f"/range(address='A{HEADER_ROW}:{last_col}{HEADER_ROW}')/format"
+        f"/range(address='A{HEADER_ROW}:L{HEADER_ROW}')/format"
     )
     try:
         graph_request_with_retry(
