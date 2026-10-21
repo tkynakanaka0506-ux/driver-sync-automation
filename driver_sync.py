@@ -766,10 +766,11 @@ def append_record_from_row_tuple(
     else:
         driver = leg_fields_at(row_tuple, primary, 0)
 
-    # 都道府県が設定されている場合、車番の頭に付与（例: Z列="福岡" + AA列="1111" → "福岡1111"）
+    # 都道府県が設定されている場合、1次配送時のみ車番の頭に付与（例: Z列="福岡" + AA列="1111" → "福岡1111"）
+    # 中継あり(has_relay)は2次配送車なので都道府県を付与しない（拠点の都道府県が対象外の可能性）
     plate_val = driver["plate"]
     pref_col = effective_map.get("prefecture", "")
-    if pref_col:
+    if pref_col and not has_relay:
         pref_val = str(cell(row_tuple, pref_col) or "").strip()
         if pref_val and plate_val:
             plate_val = f"{pref_val}{plate_val}"
@@ -3285,10 +3286,9 @@ def write_chukei_sheet(
     """「出庫案件」シートに書き込む。
 
     レイアウト（ドライバー情報シートと同一）:
-      行1〜3: ドライバー情報シートの行1〜3をコピー（動的）
-      行4〜5: 触れない（テンプレートの内容を保持）
+      行1〜5: ドライバー情報シートの行1〜5をコピー（タイトル/アラート/ラベル行）
       行6: 列ヘッダー
-      行7〜: データ（宇美工場 + 外部倉庫、出荷日昇順）
+      行7〜: データ（丸運管理シート＋中通滋賀管理シートのみ、出荷日昇順）
     """
     seg = f"worksheets('{CHUKEI_SHEET}')"
     od = (config or {}).get("onedrive_output", {})
@@ -3318,8 +3318,16 @@ def write_chukei_sheet(
     except Exception as exc:
         logging.warning("「%s」行1〜5コピー失敗（スキップ）: %s", CHUKEI_SHEET, exc)
 
-    def sort_key(r: dict) -> str:
-        return str(r.get("出荷日") or "")
+    def sort_key(r: dict) -> tuple[int, int]:
+        """出荷日 "M/D" を (月, 日) の整数タプルで返す。文字列ソートだと日付順が崩れるため。"""
+        val = str(r.get("出荷日") or "")
+        if "/" in val:
+            try:
+                m, d = val.split("/", 1)
+                return (int(m), int(d))
+            except ValueError:
+                pass
+        return (9999, 9999)
 
     def is_chukei_target(r: dict) -> bool:
         """出庫案件シート対象: 丸運の管理シート、または中通の滋賀管理シートのみ。"""
