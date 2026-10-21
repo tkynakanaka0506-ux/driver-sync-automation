@@ -3384,6 +3384,50 @@ def write_chukei_sheet(
         json={"values": clear_matrix},
     )
 
+    # 列幅を適正に設定（A〜L列）
+    # A=案件No B=案件名 C=出荷日 D=着日 E=備考 F=型式 G=車型 H=会社名 I=乗務員 J=車番 K=携帯番号 L=依頼先
+    col_widths = [75, 160, 65, 65, 130, 160, 85, 105, 65, 65, 85, 70]
+    for i, width in enumerate(col_widths):
+        col_letter = col_letter_from_index(i + 1)
+        fmt_url = (
+            f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/{seg}"
+            f"/range(address='{col_letter}:{col_letter}')/format"
+        )
+        try:
+            graph_request_with_retry(
+                "PATCH", fmt_url, graph_token, session_id=session_id,
+                json={"columnWidth": width},
+            )
+        except Exception:
+            pass
+
+    # データ行の折り返しを有効にして高さを適正化
+    if data_rows:
+        wrap_address = f"A{DATA_START_ROW}:{last_col}{data_end_row}"
+        wrap_url = (
+            f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/{seg}"
+            f"/range(address='{wrap_address}')/format"
+        )
+        try:
+            graph_request_with_retry(
+                "PATCH", wrap_url, graph_token, session_id=session_id,
+                json={"wrapText": True, "rowHeight": 32},
+            )
+        except Exception:
+            pass
+    # ヘッダー行6は折り返しなし・固定高さ
+    hdr_fmt_url = (
+        f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/{seg}"
+        f"/range(address='A{HEADER_ROW}:{last_col}{HEADER_ROW}')/format"
+    )
+    try:
+        graph_request_with_retry(
+            "PATCH", hdr_fmt_url, graph_token, session_id=session_id,
+            json={"wrapText": False, "rowHeight": 18},
+        )
+    except Exception:
+        pass
+
 
 def write_last_synced_label(graph_token: str, config: dict[str, Any]) -> None:
     """E1セルに最終更新時刻を表示（コメントBOX横の更新状況表示）。"""
