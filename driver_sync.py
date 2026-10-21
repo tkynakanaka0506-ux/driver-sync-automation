@@ -3412,7 +3412,7 @@ def write_chukei_sheet(
         except Exception:
             pass
 
-    # データ行の折り返しを有効にして高さを適正化
+    # データ行: 折り返し有効 → autofitRows で内容に合わせた行高さを自動設定
     if data_rows:
         wrap_address = f"A{DATA_START_ROW}:{last_col}{data_end_row}"
         wrap_url = (
@@ -3422,10 +3422,22 @@ def write_chukei_sheet(
         try:
             graph_request_with_retry(
                 "PATCH", wrap_url, graph_token, session_id=session_id,
-                json={"wrapText": True, "rowHeight": 32},
+                json={"wrapText": True},
             )
         except Exception:
             pass
+        # autofitRows: 折り返し後のセル内容に合わせて行高さを自動調整
+        autofit_url = (
+            f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/{seg}"
+            f"/range(address='{wrap_address}')/format/autofitRows()"
+        )
+        try:
+            graph_request_with_retry(
+                "POST", autofit_url, graph_token, session_id=session_id,
+            )
+            logging.info("「%s」データ行 autofitRows 適用", CHUKEI_SHEET)
+        except Exception as exc:
+            logging.warning("autofitRows 失敗（スキップ）: %s", exc)
     # ヘッダー行6は折り返しなし・固定高さ
     hdr_fmt_url = (
         f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/{seg}"
