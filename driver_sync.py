@@ -2740,10 +2740,20 @@ def update_onedrive_values_only(
         col_map = load_output_column_map(config)
 
         sheet_password = load_sheet_password()
+        # パスワードあり・なし両方の保護に対応。空パスワードでまず試みる。
+        try:
+            graph_unprotect_worksheet(graph_token, item_id, ws_name, session_id, "")
+            logging.info("シート保護解除（パスワードなし）: %s", ws_name)
+        except Exception:
+            pass
         if sheet_password:
-            graph_unprotect_worksheet(
-                graph_token, item_id, ws_name, session_id, sheet_password
-            )
+            try:
+                graph_unprotect_worksheet(
+                    graph_token, item_id, ws_name, session_id, sheet_password
+                )
+                logging.info("シート保護解除（パスワードあり）: %s", ws_name)
+            except Exception as e:
+                logging.warning("シート保護解除失敗: %s", e)
 
         row_count = len(rows)
         data_end_row = output_data_end_row(data_start_row, row_count)
@@ -3248,8 +3258,9 @@ def write_alert_label(
 
 
 CHUKEI_SHEET = "出庫案件"
-CHUKEI_COLUMNS = ["出荷日", "着日", "案件No", "案件名", "型式", "車型",
-                  "会社名", "乗務員", "車番", "携帯番号", "備考", "依頼先"]
+# ドライバー情報シートと同じ列順（E列=備考に着時間を含む）
+CHUKEI_COLUMNS = ["案件No", "案件名", "出荷日", "着日", "備考",
+                  "型式", "車型", "会社名", "乗務員", "車番", "携帯番号", "依頼先"]
 
 
 def write_chukei_sheet(
@@ -3279,13 +3290,14 @@ def write_chukei_sheet(
 
     def to_row(r: dict) -> list:
         key = r.get("依頼先", "")
+        # ドライバー情報シートと同じ列順: A=案件No B=案件名 C=出荷日 D=着日 E=備考(着時間) F=型式 G=車型 H=会社名 I=乗務員 J=車番 K=携帯番号 L=依頼先
         return [
-            r.get("出荷日", ""), r.get("着日", ""),
-            r.get("案件No", ""), r.get("案件名", ""),
-            r.get("型式", ""), r.get("車型", ""),
-            r.get("会社名", ""), r.get("乗務員", ""),
-            r.get("車番", ""), r.get("携帯番号", ""),
-            r.get("備考", ""), SOURCE_DISPLAY_NAMES.get(key, key),
+            r.get("案件No", ""),   r.get("案件名", ""),
+            r.get("出荷日", ""),   r.get("着日", ""),
+            r.get("備考", ""),     r.get("型式", ""),
+            r.get("車型", ""),     r.get("会社名", ""),
+            r.get("乗務員", ""),   r.get("車番", ""),
+            r.get("携帯番号", ""), SOURCE_DISPLAY_NAMES.get(key, key),
         ]
 
     matrix: list[list] = []
