@@ -788,6 +788,7 @@ def append_record_from_row_tuple(
             "中継あり": has_relay,
             "依頼先": config_key,
             "_sheet_type": "gabu" if "管理" in actual_name else "umi",
+            "_source_sheet": actual_name,
             "案件行": excel_row_num,
             "ドライバー行": excel_row_num,
             "行キー": row_key,
@@ -3309,8 +3310,19 @@ def write_chukei_sheet(
     def sort_key(r: dict) -> str:
         return str(r.get("出荷日") or "")
 
-    umi = sorted([r for r in rows if r.get("_sheet_type") != "gabu"], key=sort_key)
-    gabu = sorted([r for r in rows if r.get("_sheet_type") == "gabu"], key=sort_key)
+    def is_chukei_target(r: dict) -> bool:
+        """出庫案件シート対象: 丸運の管理シート、または中通の滋賀管理シートのみ。"""
+        key = r.get("依頼先", "")
+        sheet = r.get("_source_sheet", "")
+        if key == "maruun":
+            return True
+        if key == "nakadori" and "滋賀" in sheet:
+            return True
+        return False
+
+    target_rows = [r for r in rows if is_chukei_target(r)]
+    umi = sorted([r for r in target_rows if r.get("_sheet_type") != "gabu"], key=sort_key)
+    gabu = sorted([r for r in target_rows if r.get("_sheet_type") == "gabu"], key=sort_key)
 
     def to_row(r: dict) -> list:
         key = r.get("依頼先", "")
