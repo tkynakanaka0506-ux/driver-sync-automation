@@ -2993,7 +2993,7 @@ def update_onedrive_values_only(
             )
 
         try:
-            write_chukei_sheet(graph_token, item_id, session_id, rows)
+            write_chukei_sheet(graph_token, item_id, session_id, rows, config)
         except Exception as exc:
             logging.warning("「%s」シート更新失敗（スキップ）: %s", CHUKEI_SHEET, exc)
 
@@ -3268,19 +3268,43 @@ def write_chukei_sheet(
     item_id: str,
     session_id: str,
     rows: list[dict[str, Any]],
+    config: dict[str, Any] | None = None,
 ) -> None:
-    """「出庫案件」シートに宇美工場／外部倉庫を区分して書き込む。
+    """「出庫案件」シートに書き込む。
 
-    レイアウト:
-      行1: 宇美工場セクション見出し
-      行2: 列ヘッダー
-      行3〜: 宇美工場データ（出荷日昇順）
-      空行
-      外部倉庫セクション見出し
-      列ヘッダー
-      外部倉庫データ（出荷日昇順）
+    レイアウト（ドライバー情報シートと同一）:
+      行1〜3: ドライバー情報シートの行1〜3をコピー（動的）
+      行4〜5: 触れない（テンプレートの内容を保持）
+      行6: 列ヘッダー
+      行7〜: データ（宇美工場 + 外部倉庫、出荷日昇順）
     """
     seg = f"worksheets('{CHUKEI_SHEET}')"
+    od = (config or {}).get("onedrive_output", {})
+    driver_sheet = od.get("sheet_name", "ドライバー情報")
+
+    # 行1〜3をドライバー情報シートからコピー
+    try:
+        src_url = (
+            f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/"
+            f"worksheets('{driver_sheet}')/range(address='A1:M3')"
+        )
+        src_res = graph_request_with_retry(
+            "GET", src_url, graph_token, session_id=session_id
+        )
+        if src_res.ok:
+            src_values = src_res.json().get("values", [])
+            if src_values:
+                dst_url = (
+                    f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/"
+                    f"{seg}/range(address='A1:M3')"
+                )
+                graph_request_with_retry(
+                    "PATCH", dst_url, graph_token, session_id=session_id,
+                    json={"values": src_values},
+                )
+                logging.info("「%s」行1〜3をドライバー情報シートからコピー完了", CHUKEI_SHEET)
+    except Exception as exc:
+        logging.warning("「%s」行1〜3コピー失敗（スキップ）: %s", CHUKEI_SHEET, exc)
 
     def sort_key(r: dict) -> str:
         return str(r.get("出荷日") or "")
@@ -3300,38 +3324,47 @@ def write_chukei_sheet(
             r.get("携帯番号", ""), SOURCE_DISPLAY_NAMES.get(key, key),
         ]
 
-    matrix: list[list] = []
-    matrix.append([f"■ 宇美工場 出荷分  （{len(umi)} 件）"] + [""] * (len(CHUKEI_COLUMNS) - 1))
-    matrix.append(CHUKEI_COLUMNS)
-    matrix.extend(to_row(r) for r in umi)
-    matrix.append([""] * len(CHUKEI_COLUMNS))
-    matrix.append([f"■ 外部倉庫 出庫分  （{len(gabu)} 件）"] + [""] * (len(CHUKEI_COLUMNS) - 1))
-    matrix.append(CHUKEI_COLUMNS)
-    matrix.extend(to_row(r) for r in gabu)
+    # 行6 = ヘッダー、行7以降 = データ（行1〜5は既存の内容を保持）
+    HEADER_ROW = 6
+    DATA_START_ROW = 7
 
-    total_rows = len(matrix)
+    data_rows: list[list] = list(to_row(r) for r in umi) + list(to_row(r) for r in gabu)
     total_cols = len(CHUKEI_COLUMNS)
     last_col = col_letter_from_index(total_cols)
-    address = f"A1:{last_col}{total_rows}"
 
-    url = f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/{seg}/range(address='{address}')"
-    res = graph_request_with_retry(
-        "PATCH", url, graph_token, session_id=session_id,
-        json={"values": matrix},
+    # 6行目にヘッダーを書き込む
+    header_address = f"A{HEADER_ROW}:{last_col}{HEADER_ROW}"
+    url_header = f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/{seg}/range(address='{header_address}')"
+    graph_request_with_retry(
+        "PATCH", url_header, graph_token, session_id=session_id,
+        json={"values": [CHUKEI_COLUMNS]},
     )
-    if res.ok:
-        logging.info(
-            "「%s」シート更新: 宇美工場%d件 / 外部倉庫%d件 (%d行)",
-            CHUKEI_SHEET, len(umi), len(gabu), total_rows,
-        )
-    else:
-        logging.warning("「%s」シート書込失敗: %s %s", CHUKEI_SHEET, res.status_code, res.text[:200])
 
-    # 前回より行数が多かった場合、余剰行をクリア（最大200行まで）
-    clear_start = total_rows + 1
-    clear_end = total_rows + 50
+    # 7行目以降にデータを書き込む
+    if data_rows:
+        data_end_row = DATA_START_ROW + len(data_rows) - 1
+        data_address = f"A{DATA_START_ROW}:{last_col}{data_end_row}"
+        url_data = f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/{seg}/range(address='{data_address}')"
+        res = graph_request_with_retry(
+            "PATCH", url_data, graph_token, session_id=session_id,
+            json={"values": data_rows},
+        )
+        if res.ok:
+            logging.info(
+                "「%s」シート更新: 宇美工場%d件 / 外部倉庫%d件 (計%d行)",
+                CHUKEI_SHEET, len(umi), len(gabu), len(data_rows),
+            )
+        else:
+            logging.warning("「%s」シート書込失敗: %s %s", CHUKEI_SHEET, res.status_code, res.text[:200])
+    else:
+        data_end_row = DATA_START_ROW - 1
+        logging.info("「%s」シート: データなし", CHUKEI_SHEET)
+
+    # 余剰行をクリア（前回より件数が減った場合）
+    clear_start = data_end_row + 1
+    clear_end = clear_start + 50
     clear_address = f"A{clear_start}:{last_col}{clear_end}"
-    clear_matrix = [[""] * total_cols for _ in range(50)]
+    clear_matrix = [[""] * total_cols for _ in range(51)]
     url_clear = f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/{seg}/range(address='{clear_address}')"
     graph_request_with_retry(
         "PATCH", url_clear, graph_token, session_id=session_id,
