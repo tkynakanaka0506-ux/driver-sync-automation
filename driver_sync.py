@@ -3340,8 +3340,8 @@ def write_chukei_sheet(
         return False
 
     target_rows = [r for r in rows if is_chukei_target(r)]
-    umi = sorted([r for r in target_rows if r.get("_sheet_type") != "gabu"], key=sort_key)
-    gabu = sorted([r for r in target_rows if r.get("_sheet_type") == "gabu"], key=sort_key)
+    umi = sorted([r for r in target_rows if r.get("_sheet_type") != "gabu"], key=sort_key, reverse=True)
+    gabu = sorted([r for r in target_rows if r.get("_sheet_type") == "gabu"], key=sort_key, reverse=True)
 
     def to_row(r: dict) -> list:
         key = r.get("依頼先", "")
