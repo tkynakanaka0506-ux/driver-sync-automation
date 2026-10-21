@@ -787,6 +787,7 @@ def append_record_from_row_tuple(
             "備考": remarks,
             "中継あり": has_relay,
             "依頼先": config_key,
+            "_sheet_type": "gabu" if "管理" in actual_name else "umi",
             "案件行": excel_row_num,
             "ドライバー行": excel_row_num,
             "行キー": row_key,
@@ -2981,6 +2982,11 @@ def update_onedrive_values_only(
                 ", ".join(PROTECTED_HIDDEN_COLUMN_NAMES),
             )
 
+        try:
+            write_chukei_sheet(graph_token, item_id, session_id, rows)
+        except Exception as exc:
+            logging.warning("「%s」シート更新失敗（スキップ）: %s", CHUKEI_SHEET, exc)
+
         return data_end_row, sheet_used_end_row
     finally:
         graph_close_workbook_session(graph_token, item_id, session_id)
@@ -3238,6 +3244,86 @@ def write_alert_label(
         f"{base}/range(address='E2:E4')",
         headers=headers,
         json={"values": [[e2_text], [e3_text], [e4_text]]},
+    )
+
+
+CHUKEI_SHEET = "出庫案件"
+CHUKEI_COLUMNS = ["出荷日", "着日", "案件No", "案件名", "型式", "車型",
+                  "会社名", "乗務員", "車番", "携帯番号", "備考", "依頼先"]
+
+
+def write_chukei_sheet(
+    graph_token: str,
+    item_id: str,
+    session_id: str,
+    rows: list[dict[str, Any]],
+) -> None:
+    """「出庫案件」シートに宇美工場／外部倉庫を区分して書き込む。
+
+    レイアウト:
+      行1: 宇美工場セクション見出し
+      行2: 列ヘッダー
+      行3〜: 宇美工場データ（出荷日昇順）
+      空行
+      外部倉庫セクション見出し
+      列ヘッダー
+      外部倉庫データ（出荷日昇順）
+    """
+    seg = f"worksheets('{CHUKEI_SHEET}')"
+
+    def sort_key(r: dict) -> str:
+        return str(r.get("出荷日") or "")
+
+    umi = sorted([r for r in rows if r.get("_sheet_type") != "gabu"], key=sort_key)
+    gabu = sorted([r for r in rows if r.get("_sheet_type") == "gabu"], key=sort_key)
+
+    def to_row(r: dict) -> list:
+        key = r.get("依頼先", "")
+        return [
+            r.get("出荷日", ""), r.get("着日", ""),
+            r.get("案件No", ""), r.get("案件名", ""),
+            r.get("型式", ""), r.get("車型", ""),
+            r.get("会社名", ""), r.get("乗務員", ""),
+            r.get("車番", ""), r.get("携帯番号", ""),
+            r.get("備考", ""), SOURCE_DISPLAY_NAMES.get(key, key),
+        ]
+
+    matrix: list[list] = []
+    matrix.append([f"■ 宇美工場 出荷分  （{len(umi)} 件）"] + [""] * (len(CHUKEI_COLUMNS) - 1))
+    matrix.append(CHUKEI_COLUMNS)
+    matrix.extend(to_row(r) for r in umi)
+    matrix.append([""] * len(CHUKEI_COLUMNS))
+    matrix.append([f"■ 外部倉庫 出庫分  （{len(gabu)} 件）"] + [""] * (len(CHUKEI_COLUMNS) - 1))
+    matrix.append(CHUKEI_COLUMNS)
+    matrix.extend(to_row(r) for r in gabu)
+
+    total_rows = len(matrix)
+    total_cols = len(CHUKEI_COLUMNS)
+    last_col = col_letter_from_index(total_cols)
+    address = f"A1:{last_col}{total_rows}"
+
+    url = f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/{seg}/range(address='{address}')"
+    res = graph_request_with_retry(
+        "PATCH", url, graph_token, session_id=session_id,
+        json={"values": matrix},
+    )
+    if res.ok:
+        logging.info(
+            "「%s」シート更新: 宇美工場%d件 / 外部倉庫%d件 (%d行)",
+            CHUKEI_SHEET, len(umi), len(gabu), total_rows,
+        )
+    else:
+        logging.warning("「%s」シート書込失敗: %s %s", CHUKEI_SHEET, res.status_code, res.text[:200])
+
+    # 前回より行数が多かった場合、余剰行をクリア（最大200行まで）
+    clear_start = total_rows + 1
+    clear_end = total_rows + 50
+    clear_address = f"A{clear_start}:{last_col}{clear_end}"
+    clear_matrix = [[""] * total_cols for _ in range(50)]
+    url_clear = f"{GRAPH_BASE}/me/drive/items/{item_id}/workbook/{seg}/range(address='{clear_address}')"
+    graph_request_with_retry(
+        "PATCH", url_clear, graph_token, session_id=session_id,
+        json={"values": clear_matrix},
     )
 
 
